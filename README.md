@@ -62,7 +62,7 @@ powershell -ExecutionPolicy Bypass -File scripts/tag-release.ps1
 
 或手动：`git tag -a v1.0.1 -m v1.0.1 && git push origin v1.0.1`
 
-4. 等待 GitHub Actions 打出 `小宝蔬菜汇总-vX.Y.Z.zip` 并挂到对应 Release
+4. 等待 GitHub Actions 打出 `xiaobao-veg-vX.Y.Z.zip` 并挂到对应 Release
 
 ## 注意
 

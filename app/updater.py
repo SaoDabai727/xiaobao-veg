@@ -23,7 +23,7 @@ from app.storage import app_root
 
 GITHUB_OWNER = "SaoDabai727"
 GITHUB_REPO = "xiaobao-veg"
-ASSET_PREFIX = "小宝蔬菜汇总-"
+ASSET_PREFIX = "xiaobao-veg-"
 API_LATEST = (
     f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 )

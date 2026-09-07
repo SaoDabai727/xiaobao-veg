@@ -49,14 +49,15 @@ jobs:
           if (-not (Test-Path $src)) { throw "missing dist folder: $src" }
           $exe = Join-Path $src "小宝蔬菜汇总.exe"
           if (-not (Test-Path $exe)) { throw "missing exe: $exe" }
-          $zip = Join-Path $PWD "小宝蔬菜汇总-v$ver.zip"
+          # Use ASCII zip name — Chinese filenames get corrupted on some runners
+          $zip = Join-Path $PWD "xiaobao-veg-v$ver.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
           Compress-Archive -Path $src -DestinationPath $zip -Force
-          Get-Item $zip | Format-List Name, Length
+          Get-Item $zip | Format-List FullName, Length
 
       - name: Upload GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: 小宝蔬菜汇总-v*.zip
+          files: xiaobao-veg-v*.zip
           generate_release_notes: true
           fail_on_unmatched_files: true

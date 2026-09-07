@@ -15,6 +15,13 @@ from app import __version__
 from app.aggregator import build_detail_rows
 from app.ocr_engine import OcrEngine
 from app.parser import parse_boxes
+from app.sheet_ops import (
+    filter_row_indices,
+    jin_delta,
+    next_match_index,
+    parse_target_jin,
+    should_auto_recognize,
+)
 from app.storage import DETAIL_HEADERS, SUMMARY_HEADERS, Ledger
 from app.updater import (
     ReleaseInfo,
@@ -265,9 +272,17 @@ class App(ctk.CTk):
             header_font=sheet_font(14, "bold"),
             index_font=sheet_font(12),
         )
-        self._style_sheet(self._sheet_summary, readonly=True)
+        self._style_sheet(self._sheet_summary, readonly=False)
         self._sheet_summary.enable_bindings(
-            "single_select", "drag_select", "column_width_resize", "copy", "arrowkeys"
+            "single_select",
+            "drag_select",
+            "column_width_resize",
+            "copy",
+            "arrowkeys",
+            "edit_cell",
+        )
+        self._sheet_summary.extra_bindings(
+            [("end_edit_cell", self._on_summary_cell_edited)]
         )
         self._sheet_summary.pack(fill="both", expand=True)
 
@@ -381,12 +396,69 @@ class App(ctk.CTk):
             d2 or [], reset_col_positions=True, reset_row_positions=True
         )
         self._fit_columns(self._sheet_summary, [220, 80, 120])
-        self._style_sheet(self._sheet_summary, readonly=True)
+        self._style_sheet(self._sheet_summary, readonly=False)
+        try:
+            nrows = len(d2 or [])
+            self._sheet_summary.readonly_columns(columns=[0, 1], readonly=True)
+            if nrows:
+                # 斤数列保持可编辑（列索引 2）
+                self._sheet_summary.readonly_columns(columns=[2], readonly=False)
+        except Exception:
+            pass
 
         self._status.configure(
             text=f"明细 {len(d1)} 行 · 汇总 {len(d2)} 种"
         )
         self._refresh_done_list()
+
+    def _on_summary_cell_edited(self, event=None) -> None:
+        if self._busy or self._sheet_summary is None:
+            return
+        try:
+            # tksheet EventDataDict：row/column 为数据行列
+            row = int(event.row)
+            col = int(event.column)
+        except Exception:
+            return
+        if col != 2:
+            return
+        data = self._sheet_summary.get_sheet_data()
+        if row < 0 or row >= len(data):
+            return
+        name = str(data[row][0] or "").strip()
+        if not name:
+            return
+        # 编辑前的旧值：从账本汇总取更稳；若取不到则用单元格历史
+        old_map = {r.name: float(r.jin or 0) for r in self._ledger.summary()}
+        old = float(old_map.get(name, 0))
+        new, err = parse_target_jin(data[row][2])
+        if err:
+            messagebox.showwarning("提示", err)
+            self._reload_sheets()
+            self._reapply_search_filter()
+            return
+        assert new is not None
+        if new < 0:
+            messagebox.showwarning("提示", "斤数不能为负")
+            self._reload_sheets()
+            self._reapply_search_filter()
+            return
+        delta = jin_delta(old, new)
+        if delta == 0.0:
+            return
+        try:
+            self._ledger.adjust_jin(name, delta, remark="汇总改数")
+            self._reload_sheets()
+            self._reapply_search_filter()
+            self._status.configure(text=f"已调整：{name} {delta:+g} 斤")
+        except Exception as exc:
+            traceback.print_exc()
+            messagebox.showerror("错误", f"调整失败：{exc}")
+            self._reload_sheets()
+            self._reapply_search_filter()
+
+    def _reapply_search_filter(self) -> None:
+        return
 
     def _fit_columns(self, sheet: Sheet, widths: list[int]) -> None:
         try:

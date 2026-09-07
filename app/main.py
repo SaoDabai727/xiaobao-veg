@@ -67,6 +67,9 @@ class App(ctk.CTk):
         self._busy = False
         self._sheet_detail: Sheet | None = None
         self._sheet_summary: Sheet | None = None
+        self._detail_full: list[list] = []
+        self._summary_full: list[list] = []
+        self._match_pos: int | None = None
         self._updating = False
 
         self._build_ui()
@@ -240,6 +243,49 @@ class App(ctk.CTk):
         )
         more.pack(side="right")
 
+        search_bar = ctk.CTkFrame(right, fg_color="transparent")
+        search_bar.pack(fill="x", padx=12, pady=(4, 4))
+        ctk.CTkLabel(search_bar, text="查菜名", font=ui_font(13, "bold")).pack(
+            side="left", padx=(0, 8)
+        )
+        self._search_var = ctk.StringVar(value="")
+        self._search_entry = ctk.CTkEntry(
+            search_bar,
+            textvariable=self._search_var,
+            width=220,
+            height=34,
+            font=ui_font(14),
+            placeholder_text="输入菜名关键字…",
+        )
+        self._search_entry.pack(side="left", padx=(0, 6))
+        self._search_entry.bind("<KeyRelease>", lambda _e: self._on_search_changed())
+        ctk.CTkButton(
+            search_bar,
+            text="上一条",
+            width=72,
+            height=34,
+            font=ui_font(13),
+            command=lambda: self._goto_match(forward=False),
+        ).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(
+            search_bar,
+            text="下一条",
+            width=72,
+            height=34,
+            font=ui_font(13),
+            command=lambda: self._goto_match(forward=True),
+        ).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(
+            search_bar,
+            text="清空",
+            width=64,
+            height=34,
+            font=ui_font(13),
+            fg_color="#6c757d",
+            hover_color="#5a6268",
+            command=self._clear_search,
+        ).pack(side="left")
+
         self._tabs = ctk.CTkTabview(
             right,
             fg_color="#ffffff",
@@ -322,6 +368,10 @@ class App(ctk.CTk):
 
         self._refresh_img_list()
         self._refresh_done_list()
+        try:
+            self._tabs.configure(command=lambda _=None: self._on_search_changed())
+        except Exception:  # noqa: BLE001
+            pass
 
     def _style_sheet(self, sheet: Sheet, *, readonly: bool) -> None:
         """让内置表格更易读。"""
@@ -384,6 +434,8 @@ class App(ctk.CTk):
         h1, d1 = self._ledger.sheet_matrix("明细")
         h2, d2 = self._ledger.sheet_matrix("汇总")
         assert self._sheet_detail is not None and self._sheet_summary is not None
+        self._detail_full = [list(r) for r in (d1 or [])]
+        self._summary_full = [list(r) for r in (d2 or [])]
         self._sheet_detail.headers(h1 or DETAIL_HEADERS)
         self._sheet_detail.set_sheet_data(
             d1 or [], reset_col_positions=True, reset_row_positions=True
@@ -410,6 +462,7 @@ class App(ctk.CTk):
             text=f"明细 {len(d1)} 行 · 汇总 {len(d2)} 种"
         )
         self._refresh_done_list()
+        self._reapply_search_filter()
 
     def _on_summary_cell_edited(self, event=None) -> None:
         if self._busy or self._sheet_summary is None:
@@ -458,7 +511,80 @@ class App(ctk.CTk):
             self._reapply_search_filter()
 
     def _reapply_search_filter(self) -> None:
-        return
+        if self._sheet_detail is None or self._sheet_summary is None:
+            return
+        if not hasattr(self, "_search_var"):
+            return
+        keyword = self._search_var.get()
+        sheet, full, name_col, also = self._current_sheet_ctx()
+        idxs = filter_row_indices(full, keyword, name_col=name_col, also_cols=also)
+        view = [full[i] for i in idxs]
+        sheet.set_sheet_data(view, reset_col_positions=False, reset_row_positions=True)
+        try:
+            sheet.set_all_row_heights(ROW_H)
+        except Exception:  # noqa: BLE001
+            pass
+        if self._tabs.get() == "汇总":
+            try:
+                self._sheet_summary.readonly_columns(columns=[0, 1], readonly=True)
+                if view:
+                    self._sheet_summary.readonly_columns(columns=[2], readonly=False)
+            except Exception:  # noqa: BLE001
+                pass
+        if (keyword or "").strip() == "":
+            return
+        if not idxs:
+            self._status.configure(text="未找到")
+        else:
+            self._status.configure(text=f"第 1/{len(idxs)} 条候选 · 点下一条定位")
+
+    def _current_sheet_ctx(self) -> tuple[Sheet, list[list], int, list[int] | None]:
+        """返回 (sheet, full_rows, name_col, also_cols)。"""
+        tab = self._tabs.get()
+        if tab == "明细":
+            assert self._sheet_detail is not None
+            return self._sheet_detail, self._detail_full, 3, [2]
+        assert self._sheet_summary is not None
+        return self._sheet_summary, self._summary_full, 0, None
+
+    def _clear_search(self) -> None:
+        self._search_var.set("")
+        self._match_pos = None
+        self._on_search_changed()
+
+    def _on_search_changed(self) -> None:
+        self._match_pos = None
+        self._reapply_search_filter()
+        keyword = self._search_var.get() if hasattr(self, "_search_var") else ""
+        if (keyword or "").strip() == "":
+            self._status.configure(
+                text=(
+                    f"明细 {len(self._detail_full)} 行 · "
+                    f"汇总 {len(self._summary_full)} 种"
+                )
+            )
+
+    def _goto_match(self, *, forward: bool) -> None:
+        keyword = self._search_var.get()
+        sheet, full, name_col, also = self._current_sheet_ctx()
+        idxs = filter_row_indices(full, keyword, name_col=name_col, also_cols=also)
+        n = len(idxs)
+        if n == 0:
+            self._status.configure(text="未找到")
+            return
+        self._match_pos = next_match_index(n, self._match_pos, forward=forward)
+        assert self._match_pos is not None
+        r = self._match_pos
+        try:
+            sheet.deselect("all")
+            sheet.select_row(r)
+            sheet.see(row=r, keep_yscroll=False)
+        except Exception:  # noqa: BLE001
+            try:
+                sheet.set_currently_selected(r, 0)
+            except Exception:  # noqa: BLE001
+                pass
+        self._status.configure(text=f"第 {self._match_pos + 1}/{n} 条")
 
     def _fit_columns(self, sheet: Sheet, widths: list[int]) -> None:
         try:
@@ -694,8 +820,15 @@ class App(ctk.CTk):
                 + ("\n…" if len(skipped) > 15 else "")
                 + f"\n\n新加入待识别：{added} 张",
             )
+            if added:
+                self._status.configure(
+                    text=f"已加入 {added} 张（有跳过），请点「开始识别」"
+                )
         elif added:
-            self._status.configure(text=f"已加入待识别 {added} 张")
+            self._status.configure(text=f"已加入 {added} 张，开始识别…")
+
+        if should_auto_recognize(added, len(skipped)):
+            self._start_recognize()
 
     def _clear_images(self) -> None:
         if self._busy:

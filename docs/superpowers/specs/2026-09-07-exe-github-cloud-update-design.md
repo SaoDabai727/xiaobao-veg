@@ -67,7 +67,7 @@
 - 版本格式：语义化 `主.次.修订`（如 `1.0.1`）  
 - Git tag：`v` + 版本号，必须与 `__version__` 一致（如 `v1.0.1`）  
 - 客户端比较：去掉 tag 的 `v` 前缀后与 `__version__` 比较（可用 `packaging.version`）  
-- Release 资产名：`小宝蔬菜汇总-vX.Y.Z.zip`  
+- Release 资产名：`xiaobao-veg-vX.Y.Z.zip`（ASCII，避免 Runner 中文文件名损坏；zip 内仍为 `小宝蔬菜汇总/`）  
 - zip 内结构：一层根目录 `小宝蔬菜汇总/`，内含 `小宝蔬菜汇总.exe` 与 `_internal/` 等  
 - 更新 API（写死）：`https://api.github.com/repos/SaoDabai727/xiaobao-veg/releases/latest`  
 - 常量：`GITHUB_OWNER=SaoDabai727`，`GITHUB_REPO=xiaobao-veg`，资产名前缀 `小宝蔬菜汇总-`

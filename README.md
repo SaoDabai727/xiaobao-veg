@@ -42,9 +42,9 @@ python tests/test_logic.py
 pyinstaller build_exe.spec --noconfirm
 ```
 
-生成目录：`dist/小宝蔬菜汇总/`，请**整夹分发**（不要只拷单个 exe）。
+生成**单文件**：`dist/小宝蔬菜汇总.exe`（OCR 等依赖已内置，双击即可用，无需再装 Python/库）。
 
-也可双击 `打包EXE.bat`。
+也可双击 `打包EXE.bat`。首次启动会稍慢（解压到临时目录属正常）；账本保存在 exe 同级的 `data/`。
 
 ## 云端升级
 
@@ -65,7 +65,7 @@ powershell -ExecutionPolicy Bypass -File scripts/tag-release.ps1
 
 或手动：`git tag -a v1.0.1 -m v1.0.1 && git push origin v1.0.1`
 
-4. 等待 GitHub Actions 打出 `xiaobao-veg-vX.Y.Z.zip` 并挂到对应 Release
+4. 等待 GitHub Actions 打出 `xiaobao-veg-vX.Y.Z.exe`（直接下载用）和 `.zip`（自动更新用）并挂到对应 Release
 
 ## 注意
 

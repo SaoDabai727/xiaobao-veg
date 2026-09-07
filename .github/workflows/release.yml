@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify tag matches __version__
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VER="${TAG#v}"
+          PYVER=$(python -c "from app import __version__; print(__version__)")
+          echo "tag=$TAG py=$PYVER"
+          if [ "$VER" != "$PYVER" ]; then
+            echo "Tag version ($VER) != app.__version__ ($PYVER)"
+            exit 1
+          fi
+
+      - name: Build with PyInstaller
+        run: pyinstaller build_exe.spec --noconfirm
+
+      - name: Zip release folder
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME.TrimStart('v')
+          $src = Join-Path $PWD "dist\小宝蔬菜汇总"
+          if (-not (Test-Path $src)) { throw "missing dist folder: $src" }
+          $exe = Join-Path $src "小宝蔬菜汇总.exe"
+          if (-not (Test-Path $exe)) { throw "missing exe: $exe" }
+          $zip = Join-Path $PWD "小宝蔬菜汇总-v$ver.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path $src -DestinationPath $zip -Force
+          Get-Item $zip | Format-List Name, Length
+
+      - name: Upload GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: 小宝蔬菜汇总-v*.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true

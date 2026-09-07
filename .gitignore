@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+dist/
+build/
+*.xlsx
+_test_out.xlsx
+.venv/
+venv/
+data/last_ocr_debug.txt
+tests/_tmp_*/
+.DS_Store
+*.log

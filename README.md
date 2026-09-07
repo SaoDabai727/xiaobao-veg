@@ -1,4 +1,4 @@
-# 小宝蔬菜汇总 · 图片转 Excel
+# 蔬菜汇总 · 图片转 Excel
 
 把多张蔬菜清单图片（手写聊天 / 分拣单表格）识别后写入内置 Excel，按菜名合并斤数；月底再导出副本。
 
@@ -42,7 +42,7 @@ python tests/test_logic.py
 pyinstaller build_exe.spec --noconfirm
 ```
 
-生成**单文件**：`dist/小宝蔬菜汇总.exe`（OCR 等依赖已内置，双击即可用，无需再装 Python/库）。
+生成**单文件**：`dist/蔬菜汇总.exe`（OCR 等依赖已内置，双击即可用，无需再装 Python/库）。
 
 也可双击 `打包EXE.bat`。首次启动会稍慢（解压到临时目录属正常）；账本保存在 exe 同级的 `data/`。
 
@@ -55,7 +55,7 @@ pyinstaller build_exe.spec --noconfirm
 
 ## 发版（维护者）
 
-1. 修改 `app/__init__.py` 中的 `__version__`（如 `1.0.1`）
+1. 修改 `app/__init__.py` 中的 `__version__`（如 `1.0.3`）
 2. 提交并推送到 `main`/`master`
 3. 执行：
 
@@ -63,7 +63,7 @@ pyinstaller build_exe.spec --noconfirm
 powershell -ExecutionPolicy Bypass -File scripts/tag-release.ps1
 ```
 
-或手动：`git tag -a v1.0.1 -m v1.0.1 && git push origin v1.0.1`
+或手动：`git tag -a v1.0.3 -m v1.0.3 && git push origin v1.0.3`
 
 4. 等待 GitHub Actions 打出 `xiaobao-veg-vX.Y.Z.exe`（直接下载用）和 `.zip`（自动更新用）并挂到对应 Release
 
@@ -85,6 +85,8 @@ app/
   storage.py       # 内置 Excel 账本
   excel_export.py  # 导出副本
   units.py         # 单位换算
+assets/
+  app.ico          # 应用图标
 data/
   蔬菜账本.xlsx
 run.py

@@ -33,7 +33,7 @@ def test_merge_install_skips_data(tmp_path: Path | None = None) -> None:
     dst = base / "dst"
     (src / "_internal").mkdir(parents=True)
     (src / "_internal" / "x.txt").write_text("new", encoding="utf-8")
-    (src / "小宝蔬菜汇总.exe").write_text("exe-new", encoding="utf-8")
+    (src / "蔬菜汇总.exe").write_text("exe-new", encoding="utf-8")
     (src / "data").mkdir()
     (src / "data" / "蔬菜账本.xlsx").write_text("blank", encoding="utf-8")
     (dst / "data").mkdir(parents=True)
@@ -42,7 +42,7 @@ def test_merge_install_skips_data(tmp_path: Path | None = None) -> None:
     merge_install(src, dst)
     assert (dst / "data" / "蔬菜账本.xlsx").read_text(encoding="utf-8") == "USER"
     assert (dst / "_internal" / "x.txt").read_text(encoding="utf-8") == "new"
-    assert (dst / "小宝蔬菜汇总.exe").read_text(encoding="utf-8") == "exe-new"
+    assert (dst / "蔬菜汇总.exe").read_text(encoding="utf-8") == "exe-new"
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller 规格：生成单文件 dist/小宝蔬菜汇总.exe（依赖已内置）。"""
+"""PyInstaller 规格：生成单文件 dist/蔬菜汇总.exe（依赖已内置）。"""
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
-datas = []
+datas = [("assets/app.ico", "assets"), ("assets/app.png", "assets")]
 binaries = []
 hiddenimports = [
     "customtkinter",
@@ -55,7 +55,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="小宝蔬菜汇总",
+    name="蔬菜汇总",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -68,4 +68,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon="assets/app.ico",
 )

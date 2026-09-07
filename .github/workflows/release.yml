@@ -45,18 +45,18 @@ jobs:
         shell: pwsh
         run: |
           $ver = $env:GITHUB_REF_NAME.TrimStart('v')
-          $exe = Join-Path $PWD "dist\小宝蔬菜汇总.exe"
+          $exe = Join-Path $PWD "dist\蔬菜汇总.exe"
           if (-not (Test-Path $exe)) { throw "missing exe: $exe" }
           # ASCII copy for GitHub asset download (Chinese names corrupt on some runners)
           $exeOut = Join-Path $PWD "xiaobao-veg-v$ver.exe"
           Copy-Item $exe $exeOut -Force
-          # Zip keeps updater path: 小宝蔬菜汇总/小宝蔬菜汇总.exe
-          $stage = Join-Path $PWD "_release_stage\小宝蔬菜汇总"
+          # Zip keeps updater path: 蔬菜汇总/蔬菜汇总.exe
+          $stage = Join-Path $PWD "_release_stage\蔬菜汇总"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item $exe (Join-Path $stage "小宝蔬菜汇总.exe") -Force
+          Copy-Item $exe (Join-Path $stage "蔬菜汇总.exe") -Force
           $zip = Join-Path $PWD "xiaobao-veg-v$ver.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
-          Compress-Archive -Path (Join-Path $PWD "_release_stage\小宝蔬菜汇总") -DestinationPath $zip -Force
+          Compress-Archive -Path (Join-Path $PWD "_release_stage\蔬菜汇总") -DestinationPath $zip -Force
           Get-Item $exeOut, $zip | Format-List FullName, Length
 
       - name: Upload GitHub Release

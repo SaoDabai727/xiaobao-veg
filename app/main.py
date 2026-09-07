@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import traceback
 from pathlib import Path
 from tkinter import filedialog, font as tkfont, messagebox
 
 import customtkinter as ctk
+from PIL import Image, ImageTk
 from tksheet import Sheet
 
-from app import __version__
+from app import APP_NAME, __version__
 from app.aggregator import build_detail_rows
 from app.ocr_engine import OcrEngine
 from app.parser import parse_boxes
@@ -22,7 +24,7 @@ from app.sheet_ops import (
     parse_target_jin,
     should_auto_recognize,
 )
-from app.storage import DETAIL_HEADERS, SUMMARY_HEADERS, Ledger
+from app.storage import DETAIL_HEADERS, SUMMARY_HEADERS, Ledger, app_root
 from app.updater import (
     ReleaseInfo,
     check_for_update,
@@ -53,9 +55,10 @@ def sheet_font(size: int = 14, weight: str = "normal") -> tuple[str, int, str]:
 class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title(f"小宝蔬菜汇总 · 图片转 Excel  v{__version__}")
+        self.title(f"{APP_NAME} · 图片转 Excel  v{__version__}")
         self.geometry("1180x760")
         self.minsize(900, 600)
+        self._set_app_icon()
 
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("green")
@@ -75,6 +78,28 @@ class App(ctk.CTk):
         self._build_ui()
         self._reload_sheets()
         self.after(800, lambda: self._schedule_update_check(manual=False))
+
+    def _resource_path(self, *parts: str) -> Path:
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            return Path(sys._MEIPASS).joinpath(*parts)
+        return app_root().joinpath(*parts)
+
+    def _set_app_icon(self) -> None:
+        ico = self._resource_path("assets", "app.ico")
+        png = self._resource_path("assets", "app.png")
+        try:
+            if ico.is_file():
+                self.iconbitmap(default=str(ico))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            src = png if png.is_file() else ico
+            if src.is_file():
+                img = Image.open(src).convert("RGBA")
+                self._icon_photo = ImageTk.PhotoImage(img.resize((32, 32), Image.Resampling.LANCZOS))
+                self.iconphoto(True, self._icon_photo)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _apply_system_fonts(self) -> None:
         """系统弹窗 / 原生控件也走雅黑。"""
@@ -104,7 +129,7 @@ class App(ctk.CTk):
         top.pack(fill="x", padx=16, pady=(14, 6))
         ctk.CTkLabel(
             top,
-            text="小宝蔬菜汇总",
+            text=APP_NAME,
             font=ui_font(22, "bold"),
             text_color="#1a3d2b",
         ).pack(side="left")

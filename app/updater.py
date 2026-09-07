@@ -18,8 +18,10 @@ from typing import Callable
 
 from packaging.version import InvalidVersion, Version
 
-from app import __version__
+from app import APP_NAME, __version__
 from app.storage import app_root
+
+EXE_NAME = f"{APP_NAME}.exe"
 
 GITHUB_OWNER = "SaoDabai727"
 GITHUB_REPO = "xiaobao-veg"
@@ -144,17 +146,16 @@ def extract_release_zip(zip_path: Path, dest_dir: Path) -> Path:
     with zipfile.ZipFile(zip_path, "r") as zf:
         zf.extractall(dest_dir)
 
-    # 优先：小宝蔬菜汇总/小宝蔬菜汇总.exe
-    preferred = dest_dir / "小宝蔬菜汇总"
-    exe_name = "小宝蔬菜汇总.exe"
-    if (preferred / exe_name).is_file():
+    # 优先：蔬菜汇总/蔬菜汇总.exe
+    preferred = dest_dir / APP_NAME
+    if (preferred / EXE_NAME).is_file():
         return preferred
 
     # 递归查找
-    for p in dest_dir.rglob(exe_name):
+    for p in dest_dir.rglob(EXE_NAME):
         return p.parent
 
-    raise FileNotFoundError(f"zip 内未找到 {exe_name}")
+    raise FileNotFoundError(f"zip 内未找到 {EXE_NAME}")
 
 
 def merge_install(src_root: Path, dest_root: Path) -> None:
@@ -188,7 +189,7 @@ def _wait_pid(pid: int, timeout: float = 120.0) -> None:
 
 
 def _start_app(install_root: Path) -> None:
-    exe = install_root / "小宝蔬菜汇总.exe"
+    exe = install_root / EXE_NAME
     if exe.is_file():
         subprocess.Popen(
             [str(exe)],

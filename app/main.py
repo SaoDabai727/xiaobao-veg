@@ -16,7 +16,14 @@ from tksheet import Sheet
 from app import APP_NAME, __version__
 from app.aggregator import build_detail_rows
 from app.ocr_engine import OcrEngine
-from app.parser import parse_boxes
+from app.parser import (
+    add_custom_vegetable,
+    is_builtin_vegetable,
+    list_custom_vegetables,
+    normalize_custom_vegetable_name,
+    parse_boxes,
+    remove_custom_vegetable,
+)
 from app.sheet_ops import (
     filter_row_indices,
     jin_delta,
@@ -249,6 +256,7 @@ class App(ctk.CTk):
             variable=self._more_var,
             values=[
                 "更多…",
+                "自定义菜名",
                 "清空待识别",
                 "移除已入库来源",
                 "删除选中明细行",
@@ -435,6 +443,7 @@ class App(ctk.CTk):
     def _on_more_action(self, choice: str) -> None:
         self._more_var.set("更多…")
         mapping = {
+            "自定义菜名": self._manage_custom_vegetables,
             "清空待识别": self._clear_images,
             "移除已入库来源": self._remove_done_source,
             "删除选中明细行": self._delete_selected_rows,
@@ -867,6 +876,140 @@ class App(ctk.CTk):
         state = "disabled" if busy else "normal"
         self._recognize_btn.configure(state=state)
         self._export_btn.configure(state=state)
+
+    def _manage_custom_vegetables(self) -> None:
+        """管理用户自定义菜名词库（写入 data/custom_vegetables.json）。"""
+        if self._busy:
+            return
+        import tkinter as tk
+
+        win = ctk.CTkToplevel(self)
+        win.title("自定义菜名")
+        win.geometry("420x460")
+        win.transient(self)
+        win.grab_set()
+
+        ctk.CTkLabel(
+            win,
+            text="识别词库里没有的菜，加在这里；下次识别就会认。",
+            font=ui_font(13),
+            text_color="#4a5c52",
+            wraplength=380,
+            justify="left",
+        ).pack(anchor="w", padx=16, pady=(14, 6))
+
+        entry_row = ctk.CTkFrame(win, fg_color="transparent")
+        entry_row.pack(fill="x", padx=16, pady=(0, 8))
+        name_entry = ctk.CTkEntry(
+            entry_row, width=240, height=36, font=ui_font(14), placeholder_text="输入菜名…"
+        )
+        name_entry.pack(side="left", padx=(0, 8))
+
+        list_frame = ctk.CTkFrame(win, fg_color="#f7faf8", corner_radius=8)
+        list_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        ctk.CTkLabel(
+            list_frame, text="已添加的自定义菜名", font=ui_font(13, "bold")
+        ).pack(anchor="w", padx=10, pady=(8, 4))
+        lb_wrap = tk.Frame(list_frame, bg="#f7faf8")
+        lb_wrap.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        scrollbar = tk.Scrollbar(lb_wrap)
+        scrollbar.pack(side="right", fill="y")
+        name_lb = tk.Listbox(
+            lb_wrap,
+            font=(UI_FONT, 13),
+            height=12,
+            activestyle="dotbox",
+            selectmode=tk.EXTENDED,
+            yscrollcommand=scrollbar.set,
+            bg="#ffffff",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#dde5df",
+        )
+        name_lb.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=name_lb.yview)
+
+        tip = ctk.CTkLabel(win, text="", font=ui_font(12), text_color="#2d6a4f")
+        tip.pack(anchor="w", padx=16, pady=(0, 4))
+
+        def refresh_list() -> None:
+            name_lb.delete(0, tk.END)
+            for n in list_custom_vegetables():
+                name_lb.insert(tk.END, n)
+
+        def do_add() -> None:
+            raw = name_entry.get().strip()
+            try:
+                cleaned = normalize_custom_vegetable_name(raw)
+            except ValueError as exc:
+                messagebox.showwarning("提示", str(exc), parent=win)
+                return
+            if is_builtin_vegetable(cleaned):
+                tip.configure(text=f"「{cleaned}」已在内置词库，无需添加")
+                name_entry.delete(0, "end")
+                return
+            if cleaned in list_custom_vegetables():
+                tip.configure(text=f"「{cleaned}」已在自定义列表中")
+                name_entry.delete(0, "end")
+                return
+            add_custom_vegetable(cleaned)
+            name_entry.delete(0, "end")
+            refresh_list()
+            tip.configure(text=f"已添加「{cleaned}」，识别立即生效")
+            self._status.configure(text=f"自定义菜名已添加：{cleaned}")
+
+        def do_remove() -> None:
+            sel = name_lb.curselection()
+            if not sel:
+                messagebox.showinfo("提示", "请先选中要删除的菜名", parent=win)
+                return
+            removed: list[str] = []
+            for idx in reversed(sel):
+                target = name_lb.get(idx)
+                if remove_custom_vegetable(target):
+                    removed.append(target)
+            refresh_list()
+            if removed:
+                tip.configure(text=f"已删除 {len(removed)} 个：{'、'.join(removed[:5])}")
+                self._status.configure(text=f"自定义菜名已删除 {len(removed)} 个")
+
+        ctk.CTkButton(
+            entry_row,
+            text="添加",
+            width=72,
+            height=36,
+            font=ui_font(14),
+            fg_color="#2d6a4f",
+            hover_color="#1b4332",
+            command=do_add,
+        ).pack(side="left")
+
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 14))
+        ctk.CTkButton(
+            btn_row,
+            text="删除选中",
+            width=100,
+            height=36,
+            font=ui_font(13),
+            fg_color="#bc4749",
+            hover_color="#a4161a",
+            command=do_remove,
+        ).pack(side="left")
+        ctk.CTkButton(
+            btn_row,
+            text="关闭",
+            width=80,
+            height=36,
+            font=ui_font(13),
+            fg_color="#6c757d",
+            hover_color="#5a6268",
+            command=win.destroy,
+        ).pack(side="right")
+
+        name_entry.bind("<Return>", lambda _e: do_add())
+        refresh_list()
+        name_entry.focus_set()
 
     def _adjust_jin(self, sign: int = -1) -> None:
         """手工加斤/减斤，写入一条明细（减斤为负数），汇总自动相加减。"""

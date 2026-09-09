@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from app.units import to_jin
 
@@ -243,10 +245,17 @@ _JUNK_SUBSTRINGS = (
     "朱家",
 )
 
-# 未知词仅当长得像菜名才放行（避免档口名/菜品名入库）
+# 自由文本/聊天：未知短词须长得像菜名（后缀白名单）
 _VEG_LIKE = re.compile(
-    r".+(菜|菇|瓜|椒|葱|蒜|姜|芋|笋|豆|薯|藕|茄|芹|心|苔|苗|耳|芽|萝卜|玉米|白菜|生菜|豆腐|莴笋|莴苣|马蹄|荸荠)$"
+    r".+(菜|菇|瓜|椒|葱|蒜|姜|芋|笋|豆|薯|藕|茄|芹|心|苔|苗|耳|芽|苋|萝卜|玉米|白菜|生菜|豆腐|莴笋|莴苣|马蹄|荸荠)$"
     r"|^藕$|^姜$"
+)
+
+# 成品菜/档口菜品特征：分拣单行放行未知名时仍用来挡脏数据
+_COOKED_DISH = re.compile(
+    r"(炒饭|浇饭|盖浇|砂锅|煎饼|烩面|牛肉面|手工面|酸菜鱼|选餐|红烧|宫保|鱼香|糖醋|麻婆)"
+    r"|(炒|炖|烩|炸|煮|蒸|煎|煲|焖|溜|爆|烤)"
+    r"|.+(饭|面|汤|煲|饺|饼|糊|羹|翅|排|丁|肉)$"
 )
 
 _CATEGORY_PREFIXES = ("硬菜", "软菜", "鲜菜", "干菜", "水菜", "蔬菜", "精品菜")
@@ -275,112 +284,123 @@ _NOISE_WORDS = (
     "分类",
 )
 
-_VEGETABLES = tuple(
-    sorted(
-        {
-            "上海青",
-            "杭白菜",
-            "杭茄",
-            "奶白菜",
-            "娃娃菜",
-            "大娃娃菜",
-            "卷心菜",
-            "甘蓝",
-            "牛心菜",
-            "黄心菜",
-            "白菜",
-            "小白菜",
-            "松花菜",
-            "花菜",
-            "有机花菜",
-            "西兰花",
-            "西葫芦",
-            "西红柿",
-            "番茄",
-            "黄瓜",
-            "胡萝卜",
-            "白萝卜",
-            "青萝卜",
-            "莲藕",
-            "藕带",
-            "生姜",
-            "大蒜",
-            "蒜头",
-            "蒜苔",
-            "蒜苗",
-            "蒜米",
-            "蒜肉",
-            "线椒",
-            "青椒",
-            "红椒",
-            "彩椒",
-            "美人椒",
-            "牛角椒",
-            "牛椒",
-            "红杭椒",
-            "尖椒",
-            "洋葱",
-            "大葱",
-            "京葱",
-            "小葱",
-            "香葱",
-            "紫薯",
-            "红薯",
-            "土豆",
-            "黄心土豆",
-            "南瓜",
-            "老南瓜",
-            "带皮甜玉米棒",
-            "黄玉米棒",
-            "甜玉米",
-            "玉米棒",
-            "玉米",
-            "茄子",
-            "豆角",
-            "芹菜",
-            "西芹",
-            "香菜",
-            "韭菜",
-            "菠菜",
-            "生菜",
-            "油麦菜",
-            "空心菜",
-            "菜心",
-            "广东菜心",
-            "青菜",
-            "芥蓝",
-            "苦瓜",
-            "丝瓜",
-            "冬瓜",
-            "芋头",
-            "荔浦芋",
-            "山药",
-            "藕",
-            "蘑菇",
-            "香菇",
-            "平菇",
-            "金针菇",
-            "木耳",
-            "豆芽",
-            "豆腐",
-            "莴笋",
-            "莴苣",
-            "包菜",
-            "马蹄",
-            "马蹄肉",
-            "光荸荠",
-            "荸荠",
-            "茼蒿菜",
-            "茼蒿",
-            "鸡毛菜",
-            "青大蒜",
-            "青大蒜叶",
-            "小菠菜",
-        },
-        key=len,
-        reverse=True,
-    )
+_BUILTIN_VEGETABLES = frozenset(
+    {
+        "上海青",
+        "杭白菜",
+        "杭茄",
+        "奶白菜",
+        "娃娃菜",
+        "大娃娃菜",
+        "卷心菜",
+        "甘蓝",
+        "牛心菜",
+        "黄心菜",
+        "白菜",
+        "小白菜",
+        "松花菜",
+        "花菜",
+        "有机花菜",
+        "西兰花",
+        "西葫芦",
+        "西红柿",
+        "番茄",
+        "黄瓜",
+        "胡萝卜",
+        "白萝卜",
+        "青萝卜",
+        "莲藕",
+        "藕带",
+        "生姜",
+        "大蒜",
+        "蒜头",
+        "蒜苔",
+        "蒜苗",
+        "蒜米",
+        "蒜肉",
+        "线椒",
+        "青椒",
+        "红椒",
+        "彩椒",
+        "美人椒",
+        "牛角椒",
+        "牛椒",
+        "红杭椒",
+        "尖椒",
+        "洋葱",
+        "大葱",
+        "京葱",
+        "小葱",
+        "香葱",
+        "紫薯",
+        "红薯",
+        "土豆",
+        "黄心土豆",
+        "南瓜",
+        "老南瓜",
+        "带皮甜玉米棒",
+        "黄玉米棒",
+        "甜玉米",
+        "玉米棒",
+        "玉米",
+        "茄子",
+        "豆角",
+        "芹菜",
+        "西芹",
+        "香菜",
+        "韭菜",
+        "菠菜",
+        "生菜",
+        "油麦菜",
+        "空心菜",
+        "米苋",
+        "菜心",
+        "广东菜心",
+        "青菜",
+        "芥蓝",
+        "苦瓜",
+        "丝瓜",
+        "冬瓜",
+        "芋头",
+        "荔浦芋",
+        "山药",
+        "藕",
+        "蘑菇",
+        "香菇",
+        "平菇",
+        "金针菇",
+        "木耳",
+        "豆芽",
+        "豆腐",
+        "莴笋",
+        "莴苣",
+        "包菜",
+        "马蹄",
+        "马蹄肉",
+        "光荸荠",
+        "荸荠",
+        "茼蒿菜",
+        "茼蒿",
+        "鸡毛菜",
+        "青大蒜",
+        "青大蒜叶",
+        "小菠菜",
+    }
 )
+
+# 用户自定义（data/custom_vegetables.json）与内置合并为识别用 _VEGETABLES
+_custom_vegetables: set[str] = set()
+_CUSTOM_PATH_OVERRIDE: Path | None = None
+_VEGETABLES: tuple[str, ...] = ()
+
+
+def _rebuild_vegetables() -> None:
+    global _VEGETABLES
+    merged = set(_BUILTIN_VEGETABLES) | _custom_vegetables
+    _VEGETABLES = tuple(sorted(merged, key=len, reverse=True))
+
+
+_rebuild_vegetables()
 
 _HEADER_WORDS = re.compile(
     r"^(蔬菜|菜名|名称|品名|数量|单位|斤数|重量|清单|明细|汇总|日期|时间|硬菜|软菜)$"
@@ -436,6 +456,117 @@ def _strip_category_prefixes(text: str) -> str:
     return text
 
 
+def custom_vegetables_path() -> Path:
+    if _CUSTOM_PATH_OVERRIDE is not None:
+        return _CUSTOM_PATH_OVERRIDE
+    from app.storage import app_root
+
+    data_dir = app_root() / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "custom_vegetables.json"
+
+
+def list_custom_vegetables() -> list[str]:
+    return sorted(_custom_vegetables)
+
+
+def load_custom_vegetables(path: Path | None = None) -> list[str]:
+    """从磁盘加载自定义菜名并合并进识别词库。"""
+    global _custom_vegetables
+    p = path or custom_vegetables_path()
+    names: set[str] = set()
+    if p.exists():
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(raw, list):
+                for item in raw:
+                    if isinstance(item, str) and item.strip():
+                        names.add(item.strip())
+            elif isinstance(raw, dict) and isinstance(raw.get("names"), list):
+                for item in raw["names"]:
+                    if isinstance(item, str) and item.strip():
+                        names.add(item.strip())
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            names = set()
+    _custom_vegetables = names
+    _rebuild_vegetables()
+    return list_custom_vegetables()
+
+
+def _save_custom_vegetables(path: Path | None = None) -> None:
+    p = path or custom_vegetables_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"names": sorted(_custom_vegetables)}
+    p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def normalize_custom_vegetable_name(raw: str) -> str:
+    """校验并规范化用户要加入词库的菜名；不合法则抛 ValueError。"""
+    if not raw or not str(raw).strip():
+        raise ValueError("请填写蔬菜名称")
+    text = str(raw).strip().lstrip("*").rstrip("*")
+    text = re.sub(r"[（(][^）)]*[）)]", "", text)
+    text = "".join(ch for ch in text if "\u4e00" <= ch <= "\u9fff" or ch == "·")
+    text = _strip_category_prefixes(text).strip("·*")
+    text = _OCR_NAME_FIXES.get(text, text)
+    if not text:
+        raise ValueError("请输入中文菜名")
+    if len(text) > 8:
+        raise ValueError("菜名过长（最多 8 字）")
+    if text in _NON_VEGETABLE_NAMES or _HEADER_WORDS.match(text) or _JUNK_NAME.match(text):
+        raise ValueError(f"「{text}」不是菜名，不能加入词库")
+    if any(j in text for j in _JUNK_SUBSTRINGS):
+        raise ValueError(f"「{text}」含无效内容，不能加入词库")
+    if _COOKED_DISH.search(text):
+        raise ValueError(f"「{text}」像成品菜，不能加入词库")
+    return text
+
+
+def add_custom_vegetable(name: str) -> str:
+    """加入自定义词库并落盘。已在内置/自定义中则仍返回规范名。"""
+    cleaned = normalize_custom_vegetable_name(name)
+    if cleaned in _BUILTIN_VEGETABLES or cleaned in _custom_vegetables:
+        return cleaned
+    _custom_vegetables.add(cleaned)
+    _rebuild_vegetables()
+    _save_custom_vegetables()
+    return cleaned
+
+
+def remove_custom_vegetable(name: str) -> bool:
+    """仅删除用户自定义项；内置词库不可删。"""
+    key = (name or "").strip()
+    if key not in _custom_vegetables:
+        return False
+    _custom_vegetables.discard(key)
+    _rebuild_vegetables()
+    _save_custom_vegetables()
+    return True
+
+
+def is_builtin_vegetable(name: str) -> bool:
+    return (name or "").strip() in _BUILTIN_VEGETABLES
+
+
+try:
+    load_custom_vegetables()
+except Exception:  # noqa: BLE001
+    _rebuild_vegetables()
+
+
+def _is_plausible_unknown_veg(text: str) -> bool:
+    """未知短中文名是否可作原料菜（先挡表头/成品菜）。"""
+    if not text or len(text) < 2 or len(text) > 6:
+        return False
+    if text in _NON_VEGETABLE_NAMES or _HEADER_WORDS.match(text) or _JUNK_NAME.match(text):
+        return False
+    if any(j in text for j in _JUNK_SUBSTRINGS):
+        return False
+    if _COOKED_DISH.search(text):
+        return False
+    return True
+
+
 def clean_vegetable_name(raw: str, *, truncate: bool = True) -> str:
     if not raw:
         return ""
@@ -462,11 +593,13 @@ def clean_vegetable_name(raw: str, *, truncate: bool = True) -> str:
     # 单字菜名仅保留词库中的（如「藕」）
     if len(text) <= 1:
         return text if text in _VEGETABLES else ""
-    # 未知长串基本是表头/口号/门店，不当地当菜名
+    # 自由文本：未知名须像菜名后缀；过长多半是表头/口号
     if text not in _VEGETABLES:
         if len(text) > 6:
             return ""
         if not _VEG_LIKE.match(text):
+            return ""
+        if _COOKED_DISH.search(text):
             return ""
     if truncate and len(text) > 16:
         text = text[:16]
@@ -488,12 +621,12 @@ def split_vegetable_names(raw: str) -> list[str]:
                 matched = True
                 break
         if not matched:
-            # 未知剩余：仅接受短词且像菜名
             if (
-                2 <= len(remaining) <= 6
-                and remaining not in _NON_VEGETABLE_NAMES
-                and not any(j in remaining for j in _JUNK_SUBSTRINGS)
-                and (remaining in _VEGETABLES or _VEG_LIKE.match(remaining))
+                remaining in _VEGETABLES
+                or (
+                    _is_plausible_unknown_veg(remaining)
+                    and _VEG_LIKE.match(remaining)
+                )
             ):
                 found.append(remaining)
             break
@@ -515,8 +648,8 @@ def normalize_name(name: str) -> str:
     return clean_vegetable_name(name)
 
 
-def _clean_name_cell(text: str) -> str:
-    """表格单元格菜名：优先词典；未知短词才保留。"""
+def _clean_name_cell(text: str, *, allow_unknown: bool = False) -> str:
+    """表格单元格菜名。allow_unknown 仅用于结构完整的分拣单行。"""
     t = text.strip().lstrip("*").rstrip("*")
     if not t or t in _SKIP_TOKENS:
         return ""
@@ -532,20 +665,39 @@ def _clean_name_cell(text: str) -> str:
     cleaned = clean_vegetable_name(t, truncate=True)
     if cleaned:
         return cleaned
-    # 词典未命中：仅保留 2~6 字纯中文，且不含脏片段
+    if not allow_unknown:
+        return ""
+    # 分拣单结构完整时：干净短中文可入库（成品菜/脏词仍拒）
     only = re.sub(r"[（(][^）)]*[）)]", "", t)
     only = "".join(c for c in only if "\u4e00" <= c <= "\u9fff")
     only = _strip_category_prefixes(only).strip("*")
     if only in _VEGETABLES:
         return only
-    if (
-        2 <= len(only) <= 6
-        and only not in _NON_VEGETABLE_NAMES
-        and not any(j in only for j in _JUNK_SUBSTRINGS)
-        and (only in _VEGETABLES or _VEG_LIKE.match(only))
-    ):
+    if _is_plausible_unknown_veg(only):
         return only
     return ""
+
+
+def _row_allows_unknown_name(tokens: list[tuple[float, str]]) -> bool:
+    """像真实分拣单数据行才放行未知菜名：有分类，且有单位或数量。"""
+    texts = [t for _, t in tokens]
+    has_cat = any(
+        _CAT_TOKEN.match(t) or t.startswith("P硬") or t.startswith("P精") for t in texts
+    )
+    if not has_cat:
+        return False
+    has_unit = any(t in ("斤", "市斤", "公斤", "千克", "kg", "KG") for t in texts)
+    num_n = 0
+    for t in texts:
+        m = _LEADING_NUM.match(t.replace(" ", ""))
+        if not m or not t[0].isdigit():
+            continue
+        raw_num = m.group(1)
+        if "." not in raw_num and len(raw_num) >= 2 and raw_num.startswith("0"):
+            continue
+        if _is_reasonable_qty(float(raw_num)):
+            num_n += 1
+    return has_unit or num_n >= 1
 
 
 def _make_item(
@@ -734,6 +886,7 @@ def _parse_row_boxes(row: list[OcrBox]) -> list[ParsedItem]:
         if not any(_clean_name_cell(t) for _, t in tokens):
             return []
 
+    allow_unknown = _row_allows_unknown_name(tokens)
     names: list[str] = []
     nums: list[tuple[float, float]] = []  # cx, qty
     unit: str | None = None
@@ -777,10 +930,10 @@ def _parse_row_boxes(row: list[OcrBox]) -> list[ParsedItem]:
                 nums.append((cx, q))
             continue
 
-        # 单框聊天：茄子5斤 / 藕2节 / 白菜3个@某人
+        # 单框聊天：茄子5斤 / 藕2节 / 白菜3个@某人（聊天走严格菜名，不放宽）
         cm = _CHAT_LINE.match(t.replace(" ", ""))
         if cm and cm.group("name") and cm.group("qty"):
-            n = _clean_name_cell(cm.group("name"))
+            n = _clean_name_cell(cm.group("name"), allow_unknown=False)
             q = float(cm.group("qty"))
             u = cm.group("unit")
             tail = cm.group("tail") or ""
@@ -804,7 +957,7 @@ def _parse_row_boxes(row: list[OcrBox]) -> list[ParsedItem]:
                 item = _make_item(n, q, u or unit, t)
                 return [item] if item else []
 
-        name = _clean_name_cell(t)
+        name = _clean_name_cell(t, allow_unknown=allow_unknown)
         if name:
             names.append(name)
 
@@ -820,6 +973,9 @@ def _parse_row_boxes(row: list[OcrBox]) -> list[ParsedItem]:
         unit = "斤"
 
     item = _make_item(primary, qty, unit, line)
+    if item and primary not in _VEGETABLES:
+        note = "未收录菜名待核"
+        item.remark = f"{item.remark}；{note}" if item.remark else note
     return [item] if item else []
 
 

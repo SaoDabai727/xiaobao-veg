@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 from app.aggregator import build_detail_rows
 from app.parser import OcrBox, clean_vegetable_name, parse_boxes, parse_line, parse_plain_texts
 from app.storage import Ledger
 from app.units import to_jin
+import app.parser as parser_mod
+
+
+def _isolate_custom_veg() -> Path:
+    """测试用空自定义词库，避免本机 data/custom_vegetables.json 干扰。"""
+    td = Path(tempfile.mkdtemp(prefix="veg_custom_"))
+    parser_mod._CUSTOM_PATH_OVERRIDE = td / "custom_vegetables.json"
+    parser_mod._custom_vegetables.clear()
+    parser_mod._rebuild_vegetables()
+    return td
 
 
 def test_units() -> None:
@@ -18,6 +29,7 @@ def test_units() -> None:
 
 
 def test_clean_name() -> None:
+    _isolate_custom_veg()
     assert clean_vegetable_name("硬菜生姜") == "生姜"
     assert clean_vegetable_name("京葱（大葱）") == "京葱"
     assert clean_vegetable_name("分拣单") == ""
@@ -30,6 +42,51 @@ def test_clean_name() -> None:
     assert clean_vegetable_name("面手工牛肉面") == ""
     assert clean_vegetable_name("椒炒饭") == ""
     assert clean_vegetable_name("酸菜鱼") == ""
+    # 自由文本仍严格：词库外且不像菜名后缀的不收
+    assert clean_vegetable_name("香椿") == ""
+    assert clean_vegetable_name("宫保鸡丁") == ""
+    assert clean_vegetable_name("红烧肉") == ""
+    # 词库内 / 像菜名后缀的仍可
+    assert clean_vegetable_name("米苋") == "米苋"
+
+
+def test_custom_vegetable_library() -> None:
+    """用户自定义菜名写入词库后，自由文本识别应放行。"""
+    from app.parser import (
+        add_custom_vegetable,
+        list_custom_vegetables,
+        remove_custom_vegetable,
+    )
+
+    _isolate_custom_veg()
+    assert clean_vegetable_name("香椿") == ""
+    assert add_custom_vegetable("香椿") == "香椿"
+    assert "香椿" in list_custom_vegetables()
+    assert clean_vegetable_name("香椿") == "香椿"
+    assert clean_vegetable_name("硬菜香椿") == "香椿"
+
+    chat = [
+        OcrBox("香椿3斤", [[80, 80], [140, 80], [140, 100], [80, 100]]),
+    ]
+    items = parse_boxes(chat)
+    assert len(items) == 1
+    assert items[0].name == "香椿"
+    assert items[0].jin == 3
+
+    assert remove_custom_vegetable("香椿") is True
+    assert "香椿" not in list_custom_vegetables()
+    assert clean_vegetable_name("香椿") == ""
+
+    # 成品菜仍不可加入
+    try:
+        add_custom_vegetable("红烧肉")
+        assert False, "应拒绝成品菜"
+    except ValueError:
+        pass
+
+    # 内置菜名不重复写入自定义列表
+    assert add_custom_vegetable("西红柿") == "西红柿"
+    assert "西红柿" not in list_custom_vegetables()
 
 
 def test_reject_stall_header_row() -> None:
@@ -49,6 +106,7 @@ def test_reject_stall_header_row() -> None:
 
 
 def test_chat_and_table() -> None:
+    _isolate_custom_veg()
     chat = [
         OcrBox("茄子5斤", [[80, 80], [120, 80], [120, 100], [80, 100]]),
         OcrBox("黄瓜5斤", [[80, 110], [120, 110], [120, 130], [80, 130]]),
@@ -92,6 +150,41 @@ def test_chat_and_table() -> None:
     assert items[0].unit_raw == "公斤"
     assert items[0].jin == 5.0
     assert all(i.name != "水菜" for i in items)
+
+    # R水菜 + 米苋 + 斤：词库内应识别预定合计
+    mi = [
+        OcrBox("R水菜", [[20, 100], [40, 100], [40, 120], [20, 120]]),
+        OcrBox("米苋", [[80, 100], [140, 100], [140, 120], [80, 120]]),
+        OcrBox("斤", [[200, 100], [230, 100], [230, 120], [200, 120]]),
+        OcrBox("10", [[340, 100], [370, 100], [370, 120], [340, 120]]),
+        OcrBox("25", [[500, 100], [530, 100], [530, 120], [500, 120]]),
+        OcrBox("35", [[640, 100], [670, 100], [670, 120], [640, 120]]),
+    ]
+    items = parse_boxes(mi)
+    assert len(items) == 1
+    assert items[0].name == "米苋"
+    assert items[0].jin == 35.0
+    assert items[0].unit_raw == "斤"
+
+    # 分拣单结构完整：未收录菜名可入库，并标待核
+    xiangchun = [
+        OcrBox("R水菜", [[20, 160], [40, 160], [40, 180], [20, 180]]),
+        OcrBox("香椿", [[80, 160], [140, 160], [140, 180], [80, 180]]),
+        OcrBox("斤", [[200, 160], [230, 160], [230, 180], [200, 180]]),
+        OcrBox("8", [[640, 160], [670, 160], [670, 180], [640, 180]]),
+    ]
+    items = parse_boxes(xiangchun)
+    assert len(items) == 1
+    assert items[0].name == "香椿" and items[0].jin == 8.0
+    assert "未收录菜名待核" in items[0].remark
+
+    # 无分类的脏行：即使短中文也不放宽
+    dirty = [
+        OcrBox("选餐", [[80, 200], [120, 200], [120, 220], [80, 220]]),
+        OcrBox("香椿", [[140, 200], [180, 200], [180, 220], [140, 220]]),
+        OcrBox("计", [[200, 200], [220, 200], [220, 220], [200, 220]]),
+    ]
+    assert parse_boxes(dirty) == []
 
 
 def test_parse() -> None:
@@ -164,6 +257,7 @@ def test_ledger() -> None:
 if __name__ == "__main__":
     test_units()
     test_clean_name()
+    test_custom_vegetable_library()
     test_reject_stall_header_row()
     test_chat_and_table()
     test_parse()

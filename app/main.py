@@ -35,9 +35,10 @@ from app.storage import DETAIL_HEADERS, SUMMARY_HEADERS, Ledger, app_root
 from app.updater import (
     ReleaseInfo,
     check_for_update,
-    download_file,
+    download_release_asset,
     extract_release_zip,
     fetch_latest_release,
+    format_download_progress,
     install_root,
     is_newer,
     prepare_update_workdir,
@@ -1489,29 +1490,43 @@ class App(ctk.CTk):
             return
 
         self._updating = True
-        self._status.configure(text="正在下载更新…")
+        self._status.configure(text="正在下载更新… 0%")
+        self._progress.set(0)
         work = prepare_update_workdir()
         zip_path = work / info.asset_name
+        release_page = (
+            f"https://github.com/SaoDabai727/xiaobao-veg/releases/tag/{info.tag}"
+        )
 
         def worker() -> None:
             try:
 
-                def on_progress(done: int, total: int | None) -> None:
-                    if total:
-                        pct = int(done * 100 / total)
-                        self._ui(
-                            lambda: self._status.configure(text=f"正在下载更新… {pct}%")
-                        )
-                    else:
-                        mb = done / (1024 * 1024)
-                        self._ui(
-                            lambda: self._status.configure(
-                                text=f"正在下载更新… {mb:.1f} MB"
-                            )
-                        )
+                def on_progress(
+                    done: int, total: int | None, speed: float | None
+                ) -> None:
+                    text, ratio = format_download_progress(done, total, speed)
 
-                download_file(info.download_url, zip_path, progress_cb=on_progress)
-                self._ui(lambda: self._status.configure(text="正在安装更新…"))
+                    def tick(t=text, r=ratio) -> None:
+                        self._status.configure(text=t)
+                        self._progress.set(r)
+
+                    self._ui(tick)
+
+                def on_status(msg: str) -> None:
+                    self._ui(lambda m=msg: self._status.configure(text=m))
+
+                download_release_asset(
+                    info.download_url,
+                    zip_path,
+                    progress_cb=on_progress,
+                    status_cb=on_status,
+                )
+
+                def installing() -> None:
+                    self._status.configure(text="正在安装更新…")
+                    self._progress.set(1)
+
+                self._ui(installing)
                 extract_dir = work / "extract"
                 src_root = extract_release_zip(zip_path, extract_dir)
                 dest = install_root()
@@ -1523,11 +1538,18 @@ class App(ctk.CTk):
                 self._ui(launch)
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
+                err_txt = str(exc)
 
                 def fail() -> None:
                     self._updating = False
+                    self._progress.set(0)
                     self._status.configure(text="更新失败")
-                    messagebox.showerror("更新失败", f"下载或安装失败：\n{exc}")
+                    messagebox.showerror(
+                        "更新失败",
+                        f"{err_txt}\n\n"
+                        f"也可浏览器打开手动下载：\n{release_page}\n"
+                        f"下载 xiaobao-veg-v{info.version}.exe 覆盖原程序即可（data 文件夹勿删）。",
+                    )
 
                 self._ui(fail)
 

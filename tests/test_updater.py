@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.updater import is_newer, merge_install, normalize_version
+from app.updater import (
+    format_download_progress,
+    is_newer,
+    merge_install,
+    mirror_download_urls,
+    normalize_version,
+)
 
 
 def test_normalize_version() -> None:
@@ -18,6 +24,28 @@ def test_is_newer() -> None:
     assert not is_newer("1.0.0", "1.0.0")
     assert not is_newer("1.0.0", "1.0.1")
     assert is_newer("v1.1.0", "1.0.9")
+
+
+def test_mirror_download_urls() -> None:
+    url = "https://github.com/SaoDabai727/xiaobao-veg/releases/download/v1.0.4/xiaobao-veg-v1.0.4.zip"
+    urls = mirror_download_urls(url)
+    assert urls[0] == url
+    assert any("ghfast.top" in u for u in urls)
+    assert len(urls) == len(set(urls))
+
+
+def test_format_download_progress() -> None:
+    text, ratio = format_download_progress(
+        50 * 1024 * 1024, 100 * 1024 * 1024, 2 * 1024 * 1024
+    )
+    assert "50.0/100.0 MB" in text
+    assert "50%" in text
+    assert "MB/s" in text
+    assert abs(ratio - 0.5) < 1e-6
+    text2, ratio2 = format_download_progress(10 * 1024 * 1024, None, 100 * 1024)
+    assert "已下 10.0 MB" in text2
+    assert "KB/s" in text2
+    assert 0 < ratio2 < 1
 
 
 def test_merge_install_skips_data(tmp_path: Path | None = None) -> None:
@@ -48,5 +76,7 @@ def test_merge_install_skips_data(tmp_path: Path | None = None) -> None:
 if __name__ == "__main__":
     test_normalize_version()
     test_is_newer()
+    test_mirror_download_urls()
+    test_format_download_progress()
     test_merge_install_skips_data()
     print("ok")

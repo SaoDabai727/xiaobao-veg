@@ -250,6 +250,16 @@ class App(ctk.CTk):
             command=self._export_ledger,
         )
         self._export_btn.pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            tool,
+            text="添加菜名至蔬菜库",
+            width=148,
+            height=36,
+            font=ui_font(13),
+            fg_color="#40916c",
+            hover_color="#2d6a4f",
+            command=self._manage_custom_vegetables,
+        ).pack(side="left", padx=(0, 6))
 
         self._more_var = ctk.StringVar(value="更多…")
         more = ctk.CTkOptionMenu(
@@ -257,7 +267,6 @@ class App(ctk.CTk):
             variable=self._more_var,
             values=[
                 "更多…",
-                "自定义菜名",
                 "清空待识别",
                 "移除已入库来源",
                 "删除选中明细行",
@@ -444,7 +453,6 @@ class App(ctk.CTk):
     def _on_more_action(self, choice: str) -> None:
         self._more_var.set("更多…")
         mapping = {
-            "自定义菜名": self._manage_custom_vegetables,
             "清空待识别": self._clear_images,
             "移除已入库来源": self._remove_done_source,
             "删除选中明细行": self._delete_selected_rows,
@@ -879,20 +887,20 @@ class App(ctk.CTk):
         self._export_btn.configure(state=state)
 
     def _manage_custom_vegetables(self) -> None:
-        """管理用户自定义菜名词库（写入 data/custom_vegetables.json）。"""
+        """添加菜名至蔬菜库（写入 data/custom_vegetables.json，合并进识别词库）。"""
         if self._busy:
             return
         import tkinter as tk
 
         win = ctk.CTkToplevel(self)
-        win.title("自定义菜名")
+        win.title("添加菜名至蔬菜库")
         win.geometry("420x460")
         win.transient(self)
         win.grab_set()
 
         ctk.CTkLabel(
             win,
-            text="识别词库里没有的菜，加在这里；下次识别就会认。",
+            text="把蔬菜库里没有的菜名加进来；下次识别就会认。",
             font=ui_font(13),
             text_color="#4a5c52",
             wraplength=380,
@@ -909,7 +917,7 @@ class App(ctk.CTk):
         list_frame = ctk.CTkFrame(win, fg_color="#f7faf8", corner_radius=8)
         list_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
         ctk.CTkLabel(
-            list_frame, text="已添加的自定义菜名", font=ui_font(13, "bold")
+            list_frame, text="已加入蔬菜库的菜名", font=ui_font(13, "bold")
         ).pack(anchor="w", padx=10, pady=(8, 4))
         lb_wrap = tk.Frame(list_frame, bg="#f7faf8")
         lb_wrap.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -946,18 +954,18 @@ class App(ctk.CTk):
                 messagebox.showwarning("提示", str(exc), parent=win)
                 return
             if is_builtin_vegetable(cleaned):
-                tip.configure(text=f"「{cleaned}」已在内置词库，无需添加")
+                tip.configure(text=f"「{cleaned}」已在蔬菜库中，无需添加")
                 name_entry.delete(0, "end")
                 return
             if cleaned in list_custom_vegetables():
-                tip.configure(text=f"「{cleaned}」已在自定义列表中")
+                tip.configure(text=f"「{cleaned}」已在蔬菜库中")
                 name_entry.delete(0, "end")
                 return
             add_custom_vegetable(cleaned)
             name_entry.delete(0, "end")
             refresh_list()
-            tip.configure(text=f"已添加「{cleaned}」，识别立即生效")
-            self._status.configure(text=f"自定义菜名已添加：{cleaned}")
+            tip.configure(text=f"已加入蔬菜库「{cleaned}」，识别立即生效")
+            self._status.configure(text=f"已添加菜名至蔬菜库：{cleaned}")
 
         def do_remove() -> None:
             sel = name_lb.curselection()
@@ -971,13 +979,13 @@ class App(ctk.CTk):
                     removed.append(target)
             refresh_list()
             if removed:
-                tip.configure(text=f"已删除 {len(removed)} 个：{'、'.join(removed[:5])}")
-                self._status.configure(text=f"自定义菜名已删除 {len(removed)} 个")
+                tip.configure(text=f"已从蔬菜库删除 {len(removed)} 个：{'、'.join(removed[:5])}")
+                self._status.configure(text=f"已从蔬菜库删除 {len(removed)} 个菜名")
 
         ctk.CTkButton(
             entry_row,
-            text="添加",
-            width=72,
+            text="加入蔬菜库",
+            width=100,
             height=36,
             font=ui_font(14),
             fg_color="#2d6a4f",

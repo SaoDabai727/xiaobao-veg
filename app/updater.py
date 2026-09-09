@@ -1,4 +1,4 @@
-"""GitHub Releases 云端升级：查版本、下载、合并安装（跳过 data/）。"""
+"""GitHub Releases 云端升级：查版本、国内镜像优先下载、合并安装（跳过 data/）。"""
 
 from __future__ import annotations
 
@@ -31,12 +31,13 @@ API_LATEST = (
 )
 USER_AGENT = "xiaobao-veg-updater"
 
-# 国内直连 GitHub 常超时：按顺序尝试原址 + 公共加速前缀
+# 国内直连 GitHub 常很慢：优先公共加速前缀，官方原址最后兜底
 _MIRROR_PREFIXES = (
-    "",  # 官方原址
     "https://ghfast.top/",
     "https://gh-proxy.com/",
+    "https://ghproxy.net/",
     "https://mirror.ghproxy.com/",
+    "",  # 官方原址
 )
 
 # 约 120MB 包在慢网下可能要十几分钟
@@ -250,18 +251,22 @@ def download_release_asset(
     status_cb: Callable[[str], None] | None = None,
     timeout: float = DOWNLOAD_TIMEOUT,
 ) -> str:
-    """依次尝试原址/镜像与代理/无代理；成功返回实际 URL。"""
+    """依次尝试国内镜像/官方原址与代理/无代理；成功返回实际 URL。"""
     errors: list[str] = []
     urls = mirror_download_urls(url)
+    mirror_count = sum(1 for u in urls if u != url)
     for idx, cand in enumerate(urls):
-        # 官方首试限时较短，卡住就换镜像；镜像给足时间
-        attempt_timeout = 180.0 if idx == 0 else timeout
+        is_official = cand == url
+        # 镜像单线路卡住较快换下一条；官方兜底给足时间
+        attempt_timeout = timeout if is_official else min(600.0, timeout)
         for use_proxy in (True, False):
-            if status_cb:
-                if idx == 0 and use_proxy:
+            if status_cb and use_proxy:
+                if is_official:
                     status_cb("正在下载更新…（官方源）")
-                elif idx > 0 and use_proxy:
-                    status_cb(f"正在下载更新…（加速线路 {idx}/{len(urls) - 1}）")
+                else:
+                    status_cb(
+                        f"正在下载更新…（国内加速 {idx + 1}/{mirror_count}）"
+                    )
             label = "代理" if use_proxy else "直连"
             try:
                 if dest.exists():
@@ -285,7 +290,7 @@ def download_release_asset(
                     pass
     detail = "\n".join(errors[-6:])
     raise OSError(
-        "下载失败（已尝试官方与多个镜像）。\n"
+        "下载失败（已尝试多个国内镜像与官方源）。\n"
         "可到 GitHub Releases 手动下载安装包覆盖安装。\n\n"
         f"{detail}"
     )

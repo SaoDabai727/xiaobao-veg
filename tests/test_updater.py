@@ -29,8 +29,9 @@ def test_is_newer() -> None:
 def test_mirror_download_urls() -> None:
     url = "https://github.com/SaoDabai727/xiaobao-veg/releases/download/v1.0.4/xiaobao-veg-v1.0.4.zip"
     urls = mirror_download_urls(url)
-    assert urls[0] == url
-    assert any("ghfast.top" in u for u in urls)
+    assert urls[-1] == url  # 官方兜底在最后
+    assert "ghfast.top" in urls[0]  # 国内镜像优先
+    assert any("ghproxy.net" in u for u in urls)
     assert len(urls) == len(set(urls))
 
 

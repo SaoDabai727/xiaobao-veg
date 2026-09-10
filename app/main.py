@@ -653,14 +653,24 @@ class App(ctk.CTk):
     def _show_ledger_write_error(self, title: str, exc: BaseException) -> None:
         """账本写入失败提示；文件被 WPS/Excel 占用时给出可操作说明。"""
         traceback.print_exc()
-        locked = isinstance(exc, PermissionError) or (
-            isinstance(exc, OSError) and getattr(exc, "winerror", None) in (32, 5)
+        err_s = str(exc)
+        locked = (
+            isinstance(exc, PermissionError)
+            or (
+                isinstance(exc, OSError)
+                and (
+                    getattr(exc, "winerror", None) in (32, 5)
+                    or getattr(exc, "errno", None) == 13
+                )
+            )
+            or "Permission denied" in err_s
+            or "Errno 13" in err_s
         )
         if locked:
             messagebox.showerror(
                 title,
                 "账本文件正被其他程序占用（常见：WPS、Excel 已打开该表）。\n"
-                "请先关闭后再试。\n\n"
+                "请先关闭 WPS/Excel 后再试。\n\n"
                 f"{self._ledger.path}",
                 parent=self,
             )

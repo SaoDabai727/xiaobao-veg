@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -10,20 +12,75 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from app import APP_NAME
 from app.aggregator import DetailRow, SummaryRow, aggregate
 from app.excel_export import export_excel
 
+_LEGACY_MIGRATED = False
+
 
 def app_root() -> Path:
+    """程序安装/运行目录（exe 所在目录；开发时为项目根）。"""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
 
 
+def user_data_dir() -> Path:
+    """稳定可写的用户数据根目录。
+
+    打包后固定使用 %LOCALAPPDATA%\\蔬菜汇总，避免从微信下载目录直接运行时
+    把账本写到临时/只读位置导致 Permission denied。
+    开发模式仍用项目根目录，方便本地调试。
+    """
+    if not getattr(sys, "frozen", False):
+        return app_root()
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        base = Path(local)
+    else:
+        base = Path.home() / "AppData" / "Local"
+    path = base / APP_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def data_dir() -> Path:
+    """账本、OCR 调试、自定义菜名等持久文件目录。"""
+    path = user_data_dir() / "data"
+    path.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_data_once(path)
+    return path
+
+
+def _migrate_legacy_data_once(dest: Path) -> None:
+    """若旧版把 data/ 放在 exe 旁，且与新目录不同，则一次性拷贝缺失文件。"""
+    global _LEGACY_MIGRATED
+    if _LEGACY_MIGRATED or not getattr(sys, "frozen", False):
+        return
+    _LEGACY_MIGRATED = True
+    legacy = app_root() / "data"
+    try:
+        if not legacy.is_dir():
+            return
+        if legacy.resolve() == dest.resolve():
+            return
+        for src in legacy.iterdir():
+            if not src.is_file():
+                continue
+            target = dest / src.name
+            if target.exists():
+                continue
+            try:
+                shutil.copy2(src, target)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
 def default_ledger_path() -> Path:
-    data_dir = app_root() / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir / "蔬菜账本.xlsx"
+    return data_dir() / "蔬菜账本.xlsx"
 
 
 DETAIL_HEADERS = [

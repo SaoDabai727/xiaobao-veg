@@ -459,11 +459,9 @@ def _strip_category_prefixes(text: str) -> str:
 def custom_vegetables_path() -> Path:
     if _CUSTOM_PATH_OVERRIDE is not None:
         return _CUSTOM_PATH_OVERRIDE
-    from app.storage import app_root
+    from app.storage import data_dir
 
-    data_dir = app_root() / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir / "custom_vegetables.json"
+    return data_dir() / "custom_vegetables.json"
 
 
 def list_custom_vegetables() -> list[str]:

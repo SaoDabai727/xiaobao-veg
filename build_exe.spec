@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller 规格：生成单文件 dist/蔬菜汇总.exe（依赖已内置）。"""
+"""PyInstaller 规格：生成目录版 dist/蔬菜汇总/（启动更快，配合安装包）。"""
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
@@ -51,17 +51,13 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="蔬菜汇总",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -69,4 +65,12 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon="assets/app.ico",
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    name="蔬菜汇总",
 )

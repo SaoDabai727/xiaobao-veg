@@ -38,32 +38,58 @@ jobs:
             exit 1
           fi
 
-      - name: Build with PyInstaller
+      - name: Build with PyInstaller (onedir)
         run: pyinstaller build_exe.spec --noconfirm
 
-      - name: Stage onefile exe + updater zip
+      - name: Stage onedir zip for auto-update
         shell: pwsh
         run: |
           $ver = $env:GITHUB_REF_NAME.TrimStart('v')
-          $exe = Join-Path $PWD "dist\蔬菜汇总.exe"
+          $appDir = Join-Path $PWD "dist\蔬菜汇总"
+          $exe = Join-Path $appDir "蔬菜汇总.exe"
           if (-not (Test-Path $exe)) { throw "missing exe: $exe" }
-          # ASCII copy for GitHub asset download (Chinese names corrupt on some runners)
-          $exeOut = Join-Path $PWD "xiaobao-veg-v$ver.exe"
-          Copy-Item $exe $exeOut -Force
-          # Zip keeps updater path: 蔬菜汇总/蔬菜汇总.exe
-          $stage = Join-Path $PWD "_release_stage\蔬菜汇总"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item $exe (Join-Path $stage "蔬菜汇总.exe") -Force
+
+          # Zip 供应用内更新：蔬菜汇总/蔬菜汇总.exe + _internal/
+          $stageRoot = Join-Path $PWD "_release_stage"
+          $stage = Join-Path $stageRoot "蔬菜汇总"
+          if (Test-Path $stageRoot) { Remove-Item $stageRoot -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
+          Copy-Item $appDir $stage -Recurse -Force
+          # 勿把用户账本打进更新包
+          $dataInStage = Join-Path $stage "data"
+          if (Test-Path $dataInStage) { Remove-Item $dataInStage -Recurse -Force }
+
           $zip = Join-Path $PWD "xiaobao-veg-v$ver.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
-          Compress-Archive -Path (Join-Path $PWD "_release_stage\蔬菜汇总") -DestinationPath $zip -Force
-          Get-Item $exeOut, $zip | Format-List FullName, Length
+          Compress-Archive -Path $stage -DestinationPath $zip -Force
+          Get-Item $zip | Format-List FullName, Length
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC not found: $iscc" }
+          Add-Content -Path $env:GITHUB_ENV -Value "ISCC=$iscc"
+      - name: Build setup installer
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME.TrimStart('v')
+          & $env:ISCC "/DMyAppVersion=$ver" "installer\xiaobao-veg.iss"
+          $setup = Join-Path $PWD "xiaobao-veg-setup-v$ver.exe"
+          if (-not (Test-Path $setup)) { throw "missing setup: $setup" }
+          Get-Item $setup | Format-List FullName, Length
 
       - name: Upload GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            xiaobao-veg-v*.exe
+            xiaobao-veg-setup-v*.exe
             xiaobao-veg-v*.zip
           generate_release_notes: true
           fail_on_unmatched_files: true
+          body: |
+            ## 安装说明
+            - **推荐**：下载 `xiaobao-veg-setup-v*.exe` 安装到本机（默认 `%LOCALAPPDATA%\蔬菜汇总`）
+            - 请勿从微信下载目录直接运行 exe；账本保存在 `%LOCALAPPDATA%\蔬菜汇总\data\`
+            - 应用内「检查更新」仍使用 `xiaobao-veg-v*.zip`（只替换程序，保留账本）

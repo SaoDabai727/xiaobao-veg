@@ -19,6 +19,7 @@ from app.ocr_engine import OcrEngine
 from app.parser import (
     add_custom_vegetable,
     is_builtin_vegetable,
+    list_builtin_vegetables,
     list_custom_vegetables,
     normalize_custom_vegetable_name,
     parse_boxes,
@@ -887,64 +888,76 @@ class App(ctk.CTk):
         self._export_btn.configure(state=state)
 
     def _manage_custom_vegetables(self) -> None:
-        """添加菜名至蔬菜库（写入 data/custom_vegetables.json，合并进识别词库）。"""
+        """添加菜名至蔬菜库；可查看/搜索内置词库（只读）。"""
         if self._busy:
             return
         import tkinter as tk
 
         win = ctk.CTkToplevel(self)
         win.title("添加菜名至蔬菜库")
-        win.geometry("420x460")
+        win.geometry("460x560")
         win.transient(self)
         win.grab_set()
 
         ctk.CTkLabel(
             win,
-            text="把蔬菜库里没有的菜名加进来；下次识别就会认。",
+            text="把蔬菜库里没有的菜名加进来；下次识别就会认。内置词库可在下方查看。",
             font=ui_font(13),
             text_color="#4a5c52",
-            wraplength=380,
+            wraplength=420,
             justify="left",
         ).pack(anchor="w", padx=16, pady=(14, 6))
-
-        entry_row = ctk.CTkFrame(win, fg_color="transparent")
-        entry_row.pack(fill="x", padx=16, pady=(0, 8))
-        name_entry = ctk.CTkEntry(
-            entry_row, width=240, height=36, font=ui_font(14), placeholder_text="输入菜名…"
-        )
-        name_entry.pack(side="left", padx=(0, 8))
-
-        list_frame = ctk.CTkFrame(win, fg_color="#f7faf8", corner_radius=8)
-        list_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
-        ctk.CTkLabel(
-            list_frame, text="已加入蔬菜库的菜名", font=ui_font(13, "bold")
-        ).pack(anchor="w", padx=10, pady=(8, 4))
-        lb_wrap = tk.Frame(list_frame, bg="#f7faf8")
-        lb_wrap.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        scrollbar = tk.Scrollbar(lb_wrap)
-        scrollbar.pack(side="right", fill="y")
-        name_lb = tk.Listbox(
-            lb_wrap,
-            font=(UI_FONT, 13),
-            height=12,
-            activestyle="dotbox",
-            selectmode=tk.EXTENDED,
-            yscrollcommand=scrollbar.set,
-            bg="#ffffff",
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground="#dde5df",
-        )
-        name_lb.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=name_lb.yview)
 
         tip = ctk.CTkLabel(win, text="", font=ui_font(12), text_color="#2d6a4f")
         tip.pack(anchor="w", padx=16, pady=(0, 4))
 
-        def refresh_list() -> None:
+        tabs = ctk.CTkTabview(win, fg_color="#f7faf8")
+        tabs.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        tab_custom = tabs.add("我添加的")
+        tab_builtin = tabs.add("内置词库")
+
+        def _make_listbox(parent: ctk.CTkFrame, *, multi: bool) -> tk.Listbox:
+            lb_wrap = tk.Frame(parent, bg="#f7faf8")
+            lb_wrap.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+            scrollbar = tk.Scrollbar(lb_wrap)
+            scrollbar.pack(side="right", fill="y")
+            lb = tk.Listbox(
+                lb_wrap,
+                font=(UI_FONT, 13),
+                height=12,
+                activestyle="dotbox",
+                selectmode=tk.EXTENDED if multi else tk.BROWSE,
+                yscrollcommand=scrollbar.set,
+                bg="#ffffff",
+                relief="flat",
+                highlightthickness=1,
+                highlightbackground="#dde5df",
+            )
+            lb.pack(side="left", fill="both", expand=True)
+            scrollbar.config(command=lb.yview)
+            return lb
+
+        # —— 我添加的 ——
+        entry_row = ctk.CTkFrame(tab_custom, fg_color="transparent")
+        entry_row.pack(fill="x", padx=8, pady=(8, 6))
+        name_entry = ctk.CTkEntry(
+            entry_row, width=220, height=36, font=ui_font(14), placeholder_text="输入菜名…"
+        )
+        name_entry.pack(side="left", padx=(0, 8))
+        custom_count = ctk.CTkLabel(
+            tab_custom, text="", font=ui_font(12), text_color="#5a6b60", anchor="w"
+        )
+        custom_count.pack(fill="x", padx=10, pady=(0, 4))
+        name_lb = _make_listbox(tab_custom, multi=True)
+
+        def refresh_custom() -> None:
+            names = list_custom_vegetables()
             name_lb.delete(0, tk.END)
-            for n in list_custom_vegetables():
+            for n in names:
                 name_lb.insert(tk.END, n)
+            custom_count.configure(
+                text=f"共 {len(names)} 个（可删除）；内置菜名不会出现在此列表"
+            )
 
         def do_add() -> None:
             raw = name_entry.get().strip()
@@ -954,17 +967,21 @@ class App(ctk.CTk):
                 messagebox.showwarning("提示", str(exc), parent=win)
                 return
             if is_builtin_vegetable(cleaned):
-                tip.configure(text=f"「{cleaned}」已在蔬菜库中，无需添加")
+                tip.configure(text=f"「{cleaned}」已在内置词库中，无需添加")
                 name_entry.delete(0, "end")
+                tabs.set("内置词库")
+                search_entry.delete(0, "end")
+                search_entry.insert(0, cleaned)
+                refresh_builtin()
                 return
             if cleaned in list_custom_vegetables():
-                tip.configure(text=f"「{cleaned}」已在蔬菜库中")
+                tip.configure(text=f"「{cleaned}」已在「我添加的」列表中")
                 name_entry.delete(0, "end")
                 return
             add_custom_vegetable(cleaned)
             name_entry.delete(0, "end")
-            refresh_list()
-            tip.configure(text=f"已加入蔬菜库「{cleaned}」，识别立即生效")
+            refresh_custom()
+            tip.configure(text=f"已加入「{cleaned}」，识别立即生效")
             self._status.configure(text=f"已添加菜名至蔬菜库：{cleaned}")
 
         def do_remove() -> None:
@@ -977,9 +994,11 @@ class App(ctk.CTk):
                 target = name_lb.get(idx)
                 if remove_custom_vegetable(target):
                     removed.append(target)
-            refresh_list()
+            refresh_custom()
             if removed:
-                tip.configure(text=f"已从蔬菜库删除 {len(removed)} 个：{'、'.join(removed[:5])}")
+                tip.configure(
+                    text=f"已删除 {len(removed)} 个：{'、'.join(removed[:5])}"
+                )
                 self._status.configure(text=f"已从蔬菜库删除 {len(removed)} 个菜名")
 
         ctk.CTkButton(
@@ -992,6 +1011,41 @@ class App(ctk.CTk):
             hover_color="#1b4332",
             command=do_add,
         ).pack(side="left")
+
+        # —— 内置词库 ——
+        search_row = ctk.CTkFrame(tab_builtin, fg_color="transparent")
+        search_row.pack(fill="x", padx=8, pady=(8, 6))
+        search_entry = ctk.CTkEntry(
+            search_row,
+            width=220,
+            height=36,
+            font=ui_font(14),
+            placeholder_text="搜索内置菜名…",
+        )
+        search_entry.pack(side="left", padx=(0, 8))
+        builtin_count = ctk.CTkLabel(
+            tab_builtin, text="", font=ui_font(12), text_color="#5a6b60", anchor="w"
+        )
+        builtin_count.pack(fill="x", padx=10, pady=(0, 4))
+        builtin_lb = _make_listbox(tab_builtin, multi=False)
+        all_builtin = list_builtin_vegetables()
+
+        def refresh_builtin(_event: object | None = None) -> None:
+            q = search_entry.get().strip()
+            shown = [n for n in all_builtin if q in n] if q else all_builtin
+            builtin_lb.delete(0, tk.END)
+            for n in shown:
+                builtin_lb.insert(tk.END, n)
+            if q:
+                builtin_count.configure(
+                    text=f"匹配 {len(shown)} / 共 {len(all_builtin)} 个（只读，不可删除）"
+                )
+            else:
+                builtin_count.configure(
+                    text=f"共 {len(all_builtin)} 个（只读，不可删除）"
+                )
+
+        search_entry.bind("<KeyRelease>", refresh_builtin)
 
         btn_row = ctk.CTkFrame(win, fg_color="transparent")
         btn_row.pack(fill="x", padx=16, pady=(0, 14))
@@ -1017,7 +1071,8 @@ class App(ctk.CTk):
         ).pack(side="right")
 
         name_entry.bind("<Return>", lambda _e: do_add())
-        refresh_list()
+        refresh_custom()
+        refresh_builtin()
         name_entry.focus_set()
 
     def _adjust_jin(self, sign: int = -1) -> None:

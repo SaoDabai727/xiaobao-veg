@@ -87,6 +87,12 @@ def test_custom_vegetable_library() -> None:
     # 内置菜名不重复写入自定义列表
     assert add_custom_vegetable("西红柿") == "西红柿"
     assert "西红柿" not in list_custom_vegetables()
+    from app.parser import is_builtin_vegetable, list_builtin_vegetables
+
+    assert is_builtin_vegetable("西红柿")
+    builtins = list_builtin_vegetables()
+    assert "西红柿" in builtins
+    assert builtins == sorted(builtins)
 
 
 def test_reject_stall_header_row() -> None:

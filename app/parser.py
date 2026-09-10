@@ -470,6 +470,11 @@ def list_custom_vegetables() -> list[str]:
     return sorted(_custom_vegetables)
 
 
+def list_builtin_vegetables() -> list[str]:
+    """内置识别词库（只读）。"""
+    return sorted(_BUILTIN_VEGETABLES)
+
+
 def load_custom_vegetables(path: Path | None = None) -> list[str]:
     """从磁盘加载自定义菜名并合并进识别词库。"""
     global _custom_vegetables

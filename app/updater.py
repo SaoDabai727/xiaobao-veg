@@ -344,15 +344,34 @@ def _wait_pid(pid: int, timeout: float = 120.0) -> None:
     # 超时也继续尝试合并
 
 
+def relaunch_env() -> dict[str, str]:
+    """供更新重启用的环境：作为全新实例启动，避免 PyInstaller onefile 父进程校验失败。"""
+    env = os.environ.copy()
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    for key in list(env):
+        if key.startswith("_PYI_") or key in ("_MEIPASS2", "_MEIPASS"):
+            env.pop(key, None)
+    return env
+
+
+def _detached_flags() -> int:
+    if sys.platform != "win32":
+        return 0
+    return getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+    )
+
+
 def _start_app(install_root: Path) -> None:
     exe = install_root / EXE_NAME
+    env = relaunch_env()
     if exe.is_file():
         subprocess.Popen(
             [str(exe)],
             cwd=str(install_root),
+            env=env,
             close_fds=True,
-            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            creationflags=_detached_flags(),
         )
         return
     # 开发模式
@@ -361,6 +380,7 @@ def _start_app(install_root: Path) -> None:
         subprocess.Popen(
             [sys.executable, str(run_py)],
             cwd=str(install_root),
+            env=env,
             close_fds=True,
         )
 
@@ -414,12 +434,12 @@ def spawn_apply_and_exit(src_root: Path, dest_root: Path) -> None:
             str(pid),
         ]
 
-    flags = 0
-    if sys.platform == "win32":
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-        )
-    subprocess.Popen(cmd, close_fds=True, creationflags=flags)
+    subprocess.Popen(
+        cmd,
+        env=relaunch_env(),
+        close_fds=True,
+        creationflags=_detached_flags(),
+    )
     os._exit(0)
 
 

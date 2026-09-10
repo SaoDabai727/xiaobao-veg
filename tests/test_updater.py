@@ -10,6 +10,7 @@ from app.updater import (
     merge_install,
     mirror_download_urls,
     normalize_version,
+    relaunch_env,
 )
 
 
@@ -33,6 +34,21 @@ def test_mirror_download_urls() -> None:
     assert "ghfast.top" in urls[0]  # 国内镜像优先
     assert any("ghproxy.net" in u for u in urls)
     assert len(urls) == len(set(urls))
+
+
+def test_relaunch_env_resets_pyinstaller() -> None:
+    import os
+
+    os.environ["_PYI_PARENT_PROCESS_LEVEL"] = "1"
+    os.environ["_MEIPASS2"] = "C:\\tmp\\_MEI123"
+    try:
+        env = relaunch_env()
+        assert env.get("PYINSTALLER_RESET_ENVIRONMENT") == "1"
+        assert "_PYI_PARENT_PROCESS_LEVEL" not in env
+        assert "_MEIPASS2" not in env
+    finally:
+        os.environ.pop("_PYI_PARENT_PROCESS_LEVEL", None)
+        os.environ.pop("_MEIPASS2", None)
 
 
 def test_format_download_progress() -> None:
@@ -78,6 +94,7 @@ if __name__ == "__main__":
     test_normalize_version()
     test_is_newer()
     test_mirror_download_urls()
+    test_relaunch_env_resets_pyinstaller()
     test_format_download_progress()
     test_merge_install_skips_data()
     print("ok")

@@ -549,8 +549,7 @@ class App(ctk.CTk):
             self._reapply_search_filter()
             self._status.configure(text=f"已调整：{name} {delta:+g} 斤")
         except Exception as exc:
-            traceback.print_exc()
-            messagebox.showerror("错误", f"调整失败：{exc}")
+            self._show_ledger_write_error("调整失败", exc)
             self._reload_sheets()
             self._reapply_search_filter()
 
@@ -794,9 +793,10 @@ class App(ctk.CTk):
             messagebox.showinfo(
                 "导出完成",
                 f"已导出副本：\n{out}\n\n内置账本仍保留在：\n{self._ledger.path}",
+                parent=self,
             )
         except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("错误", f"导出失败：{exc}")
+            self._show_ledger_write_error("导出失败", exc)
 
     # ---------- 图片 ----------
     def _refresh_done_list(self) -> None:
@@ -839,12 +839,17 @@ class App(ctk.CTk):
             return
         name, _, count = stats[idx]
         if not messagebox.askyesno(
-            "确认", f"删除「{name}」的全部 {count} 条明细？\n汇总会相应减少。"
+            "确认",
+            f"删除「{name}」的全部 {count} 条明细？\n汇总会相应减少。",
+            parent=self,
         ):
             return
-        n = self._ledger.delete_by_source(name)
-        self._reload_sheets()
-        messagebox.showinfo("完成", f"已移除 {n} 条（来源：{name}）")
+        try:
+            n = self._ledger.delete_by_source(name)
+            self._reload_sheets()
+            messagebox.showinfo("完成", f"已移除 {n} 条（来源：{name}）", parent=self)
+        except Exception as exc:  # noqa: BLE001
+            self._show_ledger_write_error("移除失败", exc)
 
     def _refresh_img_list(self) -> None:
         self._img_list.configure(state="normal")
@@ -1140,7 +1145,11 @@ class App(ctk.CTk):
                 messagebox.showwarning("提示", "请输入大于 0 的斤数", parent=win)
                 return
             delta = -qty if sign < 0 else qty
-            self._ledger.adjust_jin(name, delta)
+            try:
+                self._ledger.adjust_jin(name, delta)
+            except Exception as exc:  # noqa: BLE001
+                self._show_ledger_write_error(f"{title}失败", exc)
+                return
             win.destroy()
             self._reload_sheets()
             self._tabs.set("汇总")
@@ -1333,7 +1342,7 @@ class App(ctk.CTk):
                 except Exception as exc:  # noqa: BLE001
                     traceback.print_exc()
                     self._set_busy(False)
-                    messagebox.showerror("错误", f"入库失败：{exc}")
+                    self._show_ledger_write_error("入库失败", exc)
 
             self._ui(done)
         except Exception as exc:  # noqa: BLE001
@@ -1342,7 +1351,7 @@ class App(ctk.CTk):
             def fail() -> None:
                 self._set_busy(False)
                 self._status.configure(text="识别失败")
-                messagebox.showerror("错误", f"处理失败：{exc}")
+                self._show_ledger_write_error("处理失败", exc)
 
             self._ui(fail)
 

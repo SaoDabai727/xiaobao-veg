@@ -651,6 +651,23 @@ class App(ctk.CTk):
         except Exception:  # noqa: BLE001
             pass
 
+    def _show_ledger_write_error(self, title: str, exc: BaseException) -> None:
+        """账本写入失败提示；文件被 WPS/Excel 占用时给出可操作说明。"""
+        traceback.print_exc()
+        locked = isinstance(exc, PermissionError) or (
+            isinstance(exc, OSError) and getattr(exc, "winerror", None) in (32, 5)
+        )
+        if locked:
+            messagebox.showerror(
+                title,
+                "账本文件正被其他程序占用（常见：WPS、Excel 已打开该表）。\n"
+                "请先关闭后再试。\n\n"
+                f"{self._ledger.path}",
+                parent=self,
+            )
+            return
+        messagebox.showerror(title, f"{exc}", parent=self)
+
     def _cleanup_ledger(self) -> None:
         """手动清洗：去硬菜前缀、拆粘连、剔非菜名、标异常斤数。"""
         if self._busy:
@@ -658,15 +675,15 @@ class App(ctk.CTk):
         if not messagebox.askyesno(
             "清洗账本",
             "将清洗菜名前缀/粘连名，并剔除「客服、分拣单」等非菜名。\n继续？",
+            parent=self,
         ):
             return
         try:
             n = self._ledger.cleanup_names()
             self._reload_sheets()
-            messagebox.showinfo("完成", f"清洗完成，改动 {n} 处")
+            messagebox.showinfo("完成", f"清洗完成，改动 {n} 处", parent=self)
         except Exception as exc:  # noqa: BLE001
-            traceback.print_exc()
-            messagebox.showerror("错误", f"清洗失败：{exc}")
+            self._show_ledger_write_error("清洗失败", exc)
 
     def _save_sheet_to_ledger(self) -> None:
         if self._busy or self._sheet_detail is None:
@@ -683,6 +700,7 @@ class App(ctk.CTk):
                 if not messagebox.askyesno(
                     "警告",
                     "当前表格是空的，但账本里还有数据。\n继续保存会清空账本！是否仍要保存？",
+                    parent=self,
                 ):
                     return
             headers = list(self._sheet_detail.headers()) or DETAIL_HEADERS
@@ -690,10 +708,11 @@ class App(ctk.CTk):
                 headers = [str(h) for h in headers]
             self._ledger.save_detail_matrix([str(h) for h in headers], data)
             self._reload_sheets()
-            messagebox.showinfo("已保存", f"表格已写入真实 Excel：\n{self._ledger.path}")
+            messagebox.showinfo(
+                "已保存", f"表格已写入真实 Excel：\n{self._ledger.path}", parent=self
+            )
         except Exception as exc:  # noqa: BLE001
-            traceback.print_exc()
-            messagebox.showerror("错误", f"保存失败：{exc}")
+            self._show_ledger_write_error("保存失败", exc)
 
     def _delete_selected_rows(self) -> None:
         if self._busy or self._sheet_detail is None:
@@ -706,7 +725,9 @@ class App(ctk.CTk):
             messagebox.showinfo("提示", "请先在「明细」表中选中要删除的行")
             return
         rows = sorted(int(r) for r in selected)
-        if not messagebox.askyesno("确认", f"删除明细表中选中的 {len(rows)} 行？"):
+        if not messagebox.askyesno(
+            "确认", f"删除明细表中选中的 {len(rows)} 行？", parent=self
+        ):
             return
         # 先保存当前编辑，再按行删
         try:
@@ -717,8 +738,7 @@ class App(ctk.CTk):
             self._reload_sheets()
             self._status.configure(text=f"已删除 {n} 行")
         except Exception as exc:  # noqa: BLE001
-            traceback.print_exc()
-            messagebox.showerror("错误", f"删除失败：{exc}")
+            self._show_ledger_write_error("删除失败", exc)
 
     def _open_in_excel(self) -> None:
         """用系统默认程序（Excel / WPS）打开真实账本文件。"""
@@ -735,10 +755,19 @@ class App(ctk.CTk):
     def _clear_ledger(self) -> None:
         if self._busy:
             return
-        if not messagebox.askyesno("确认清空", "清空内置 Excel 全部数据，且不可恢复？"):
+        if not messagebox.askyesno(
+            "确认清空",
+            "清空内置 Excel 全部数据，且不可恢复？",
+            parent=self,
+        ):
             return
-        self._ledger.clear_all()
-        self._reload_sheets()
+        try:
+            self._ledger.clear_all()
+            self._reload_sheets()
+            self._status.configure(text="账本已清空")
+            messagebox.showinfo("完成", "账本已清空。", parent=self)
+        except Exception as exc:  # noqa: BLE001
+            self._show_ledger_write_error("清空失败", exc)
 
     def _export_ledger(self) -> None:
         if self._busy:

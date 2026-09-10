@@ -39,7 +39,8 @@ InfoBeforeFile=
 LicenseFile=
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; CI 自带的 Inno 非商业版不含简体语言包；向导用英文，自定义文案仍为中文
+Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加图标:"; Flags: checkedonce

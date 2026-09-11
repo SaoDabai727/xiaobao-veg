@@ -257,6 +257,14 @@ _COOKED_DISH = re.compile(
     r"|(炒|炖|烩|炸|煮|蒸|煎|煲|焖|溜|爆|烤)"
     r"|.+(饭|面|汤|煲|饺|饼|糊|羹|翅|排|丁|肉)$"
 )
+# 名字像成品菜、但是真实蔬菜（如蒜肉=蒜瓣），不走成品菜拦截
+_COOKED_DISH_EXCEPTIONS = frozenset({"蒜肉"})
+
+
+def _is_cooked_dish_name(text: str) -> bool:
+    if not text or text in _COOKED_DISH_EXCEPTIONS:
+        return False
+    return bool(_COOKED_DISH.search(text))
 
 _CATEGORY_PREFIXES = ("硬菜", "软菜", "鲜菜", "干菜", "水菜", "蔬菜", "精品菜")
 _KEEP_LEADING_CAI = ("菜心", "菜花", "芥菜", "菠菜")
@@ -317,6 +325,7 @@ _BUILTIN_VEGETABLES = frozenset(
         "蒜苔",
         "蒜苗",
         "蒜米",
+        "蒜肉",
         "线椒",
         "青椒",
         "红椒",
@@ -519,7 +528,7 @@ def normalize_custom_vegetable_name(raw: str) -> str:
         raise ValueError(f"「{text}」不是菜名，不能加入词库")
     if any(j in text for j in _JUNK_SUBSTRINGS):
         raise ValueError(f"「{text}」含无效内容，不能加入词库")
-    if _COOKED_DISH.search(text):
+    if _is_cooked_dish_name(text):
         raise ValueError(f"「{text}」像成品菜，不能加入词库")
     return text
 
@@ -567,7 +576,7 @@ def _is_plausible_unknown_veg(text: str) -> bool:
         return False
     if any(j in text for j in _JUNK_SUBSTRINGS):
         return False
-    if _COOKED_DISH.search(text):
+    if _is_cooked_dish_name(text):
         return False
     return True
 
@@ -596,7 +605,7 @@ def _extract_candidate_name(raw: str) -> str:
         return ""
     if any(j in text for j in _JUNK_SUBSTRINGS):
         return ""
-    if _COOKED_DISH.search(text):
+    if _is_cooked_dish_name(text):
         return ""
     return text
 

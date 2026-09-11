@@ -17,6 +17,7 @@ from app import APP_NAME, __version__
 from app.aggregator import build_detail_rows
 from app.ocr_engine import OcrEngine
 from app.parser import (
+    PENDING_NEW_VEG_REMARK,
     add_custom_vegetable,
     is_builtin_vegetable,
     list_builtin_vegetables,
@@ -1256,11 +1257,17 @@ class App(ctk.CTk):
                 if getattr(d, "is_subtract", False)
                 and str(getattr(d, "remark", "") or "").startswith("待填斤数-档口取消")
             ]
+            new_veg_pending = [
+                d
+                for d in all_details
+                if str(getattr(d, "remark", "") or "") == PENDING_NEW_VEG_REMARK
+            ]
             adds = [
                 d
                 for d in all_details
                 if not getattr(d, "is_subtract", False)
                 and not str(getattr(d, "remark", "") or "").startswith("改单加项")
+                and str(getattr(d, "remark", "") or "") != PENDING_NEW_VEG_REMARK
             ]
             replace_adds = {
                 str(getattr(d, "remark", "") or "").split("|", 1)[-1]: d
@@ -1281,12 +1288,27 @@ class App(ctk.CTk):
                 confirmed_n = 0
                 replace_n = 0
                 cancel_n = 0
+                new_veg_n = 0
+                new_veg_lib_n = 0
                 try:
                     if replace_sources:
                         for src in replace_sources:
                             self._ledger.delete_by_source(src)
                     if adds:
                         added += self._ledger.append_details(adds)
+                    # 未收录新菜：询问是否真实蔬菜、是否写入蔬菜库
+                    if new_veg_pending:
+                        accepted, lib_added = self._confirm_new_vegetables(
+                            new_veg_pending
+                        )
+                        new_veg_lib_n = lib_added
+                        if accepted:
+                            for row in accepted:
+                                row.remark = "新菜(已确认)"
+                                if row.jin is not None:
+                                    row.include_in_summary = True
+                            new_veg_n = self._ledger.append_details(accepted)
+                            added += new_veg_n
                     # 档口取消：先填斤数，再作为减项写入
                     if cancel_pending:
                         filled = self._ask_cancel_quantities(cancel_pending)
@@ -1336,6 +1358,12 @@ class App(ctk.CTk):
                     self._tabs.set("汇总")
                     self._set_busy(False)
                     msg = f"已写入明细 {added} 行。\n文件：{self._ledger.path}"
+                    if new_veg_pending:
+                        msg += (
+                            f"\n新菜确认：入库 {new_veg_n} 条，"
+                            f"写入蔬菜库 {new_veg_lib_n} 个，"
+                            f"跳过 {len(new_veg_pending) - new_veg_n} 条。"
+                        )
                     if cancel_pending:
                         msg += f"\n档口取消：确认减斤 {cancel_n} 条。"
                     if subs:
@@ -1452,6 +1480,132 @@ class App(ctk.CTk):
 
         win.wait_window()
         return result
+
+    def _confirm_new_vegetables(self, rows: list) -> tuple[list, int]:
+        """询问未收录菜名是否真实蔬菜并写入蔬菜库。
+
+        返回 (确认入库的行, 新写入蔬菜库的菜名个数)。
+        """
+        by_name: dict[str, list] = {}
+        for row in rows:
+            key = str(getattr(row, "name", "") or "").strip()
+            if not key:
+                continue
+            by_name.setdefault(key, []).append(row)
+        if not by_name:
+            return [], 0
+
+        win = ctk.CTkToplevel(self)
+        win.title("确认新菜名")
+        win.geometry("620x460")
+        win.transient(self)
+        win.grab_set()
+
+        ctk.CTkLabel(
+            win,
+            text=(
+                "识别到以下名称不在蔬菜库中（已过滤明显脏词）。\n"
+                "请确认是否为真实蔬菜：勾选后将写入蔬菜库，并完成本次入库；\n"
+                "不勾选则视为脏数据，跳过不入库。"
+            ),
+            wraplength=580,
+            justify="left",
+            font=ui_font(13),
+        ).pack(anchor="w", padx=16, pady=(16, 8))
+
+        frame = ctk.CTkScrollableFrame(win, width=580, height=300)
+        frame.pack(fill="both", expand=True, padx=16, pady=4)
+
+        vars_rows: list[tuple] = []
+        for name, group in sorted(by_name.items(), key=lambda x: x[0]):
+            jin_sum = 0.0
+            has_jin = False
+            for r in group:
+                if r.jin is not None:
+                    jin_sum += float(r.jin)
+                    has_jin = True
+            srcs = sorted({str(getattr(r, "source_image", "") or "") for r in group})
+            src_txt = "、".join(s for s in srcs if s)[:40]
+            qty_txt = f"{jin_sum:g} 斤" if has_jin else f"{len(group)} 条"
+            label = f"是真实蔬菜，写入蔬菜库：{name}　（{qty_txt}）"
+            if src_txt:
+                label += f"　· {src_txt}"
+
+            var = ctk.BooleanVar(value=False)
+            ctk.CTkCheckBox(frame, text=label, variable=var, font=ui_font(13)).pack(
+                anchor="w", pady=4
+            )
+            vars_rows.append((var, name, group))
+
+        accepted: list = []
+        lib_added = 0
+
+        def select_all(flag: bool) -> None:
+            for var, _, _ in vars_rows:
+                var.set(flag)
+
+        def on_ok() -> None:
+            nonlocal lib_added
+            for var, name, group in vars_rows:
+                if not var.get():
+                    continue
+                try:
+                    add_custom_vegetable(name)
+                    lib_added += 1
+                except ValueError as exc:
+                    messagebox.showwarning(
+                        "无法写入蔬菜库",
+                        f"「{name}」：{exc}\n已跳过该项。",
+                        parent=win,
+                    )
+                    continue
+                accepted.extend(group)
+            win.destroy()
+
+        def on_skip() -> None:
+            accepted.clear()
+            win.destroy()
+
+        btns = ctk.CTkFrame(win, fg_color="transparent")
+        btns.pack(fill="x", padx=16, pady=12)
+        ctk.CTkButton(
+            btns,
+            text="全选",
+            width=80,
+            height=34,
+            font=ui_font(13),
+            fg_color="gray50",
+            command=lambda: select_all(True),
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            btns,
+            text="全不选",
+            width=80,
+            height=34,
+            font=ui_font(13),
+            fg_color="gray50",
+            command=lambda: select_all(False),
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            btns,
+            text="全部跳过",
+            width=100,
+            height=34,
+            font=ui_font(13),
+            fg_color="gray50",
+            command=on_skip,
+        ).pack(side="right", padx=(6, 0))
+        ctk.CTkButton(
+            btns,
+            text="确认勾选项",
+            width=120,
+            height=34,
+            font=ui_font(13),
+            command=on_ok,
+        ).pack(side="right")
+
+        win.wait_window()
+        return accepted, lib_added
 
     def _confirm_subtract_rows(self, rows: list) -> list:
         """弹窗确认图片中识别到的减斤项；返回用户勾选确认的行。"""

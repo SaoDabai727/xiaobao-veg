@@ -42,11 +42,11 @@ def test_clean_name() -> None:
     assert clean_vegetable_name("面手工牛肉面") == ""
     assert clean_vegetable_name("椒炒饭") == ""
     assert clean_vegetable_name("酸菜鱼") == ""
-    # 自由文本仍严格：词库外且不像菜名后缀的不收
+    # 词库外不自动放行
     assert clean_vegetable_name("香椿") == ""
     assert clean_vegetable_name("宫保鸡丁") == ""
     assert clean_vegetable_name("红烧肉") == ""
-    # 词库内 / 像菜名后缀的仍可
+    # 词库内可认
     assert clean_vegetable_name("米苋") == "米苋"
 
 
@@ -172,7 +172,7 @@ def test_chat_and_table() -> None:
     assert items[0].jin == 35.0
     assert items[0].unit_raw == "斤"
 
-    # 分拣单结构完整：未收录菜名可入库，并标待核
+    # 分拣单结构完整但未收录：标待确认，不直接入库
     xiangchun = [
         OcrBox("R水菜", [[20, 160], [40, 160], [40, 180], [20, 180]]),
         OcrBox("香椿", [[80, 160], [140, 160], [140, 180], [80, 180]]),
@@ -182,15 +182,27 @@ def test_chat_and_table() -> None:
     items = parse_boxes(xiangchun)
     assert len(items) == 1
     assert items[0].name == "香椿" and items[0].jin == 8.0
-    assert "未收录菜名待核" in items[0].remark
+    assert items[0].remark == "待确认新菜"
+    assert items[0].include_in_summary is False
 
-    # 无分类的脏行：即使短中文也不放宽
+    # 脏行也不收
     dirty = [
         OcrBox("选餐", [[80, 200], [120, 200], [120, 220], [80, 220]]),
         OcrBox("香椿", [[140, 200], [180, 200], [180, 220], [140, 220]]),
         OcrBox("计", [[200, 200], [220, 200], [220, 220], [200, 220]]),
     ]
     assert parse_boxes(dirty) == []
+
+    # 加入蔬菜库后，分拣单直接识别（无需待确认）
+    from app.parser import add_custom_vegetable, remove_custom_vegetable
+
+    assert add_custom_vegetable("香椿") == "香椿"
+    items = parse_boxes(xiangchun)
+    assert len(items) == 1
+    assert items[0].name == "香椿" and items[0].jin == 8.0
+    assert items[0].remark != "待确认新菜"
+    assert items[0].include_in_summary is True
+    remove_custom_vegetable("香椿")
 
 
 def test_parse() -> None:

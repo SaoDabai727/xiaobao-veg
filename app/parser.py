@@ -245,13 +245,13 @@ _JUNK_SUBSTRINGS = (
     "朱家",
 )
 
-# 自由文本/聊天：未知短词须长得像菜名（后缀白名单）
+# 自由文本候选：未知短词须长得像菜名（后缀白名单），再交给用户确认
 _VEG_LIKE = re.compile(
     r".+(菜|菇|瓜|椒|葱|蒜|姜|芋|笋|豆|薯|藕|茄|芹|心|苔|苗|耳|芽|苋|萝卜|玉米|白菜|生菜|豆腐|莴笋|莴苣|马蹄|荸荠)$"
     r"|^藕$|^姜$"
 )
 
-# 成品菜/档口菜品特征：分拣单行放行未知名时仍用来挡脏数据
+# 成品菜/档口菜品特征（加自定义菜名时拦截）
 _COOKED_DISH = re.compile(
     r"(炒饭|浇饭|盖浇|砂锅|煎饼|烩面|牛肉面|手工面|酸菜鱼|选餐|红烧|宫保|鱼香|糖醋|麻婆)"
     r"|(炒|炖|烩|炸|煮|蒸|煎|煲|焖|溜|爆|烤)"
@@ -557,8 +557,11 @@ except Exception:  # noqa: BLE001
     _rebuild_vegetables()
 
 
+PENDING_NEW_VEG_REMARK = "待确认新菜"
+
+
 def _is_plausible_unknown_veg(text: str) -> bool:
-    """未知短中文名是否可作原料菜（先挡表头/成品菜）。"""
+    """未知短中文名是否值得弹窗询问（先挡表头/成品菜）。"""
     if not text or len(text) < 2 or len(text) > 6:
         return False
     if text in _NON_VEGETABLE_NAMES or _HEADER_WORDS.match(text) or _JUNK_NAME.match(text):
@@ -570,7 +573,8 @@ def _is_plausible_unknown_veg(text: str) -> bool:
     return True
 
 
-def clean_vegetable_name(raw: str, *, truncate: bool = True) -> str:
+def _extract_candidate_name(raw: str) -> str:
+    """从单元格抽出候选菜名（不做词库门槛），脏词返回空。"""
     if not raw:
         return ""
     text = raw.strip().lstrip("*").rstrip("*")
@@ -593,17 +597,18 @@ def clean_vegetable_name(raw: str, *, truncate: bool = True) -> str:
         return ""
     if any(j in text for j in _JUNK_SUBSTRINGS):
         return ""
-    # 单字菜名仅保留词库中的（如「藕」）
-    if len(text) <= 1:
-        return text if text in _VEGETABLES else ""
-    # 自由文本：未知名须像菜名后缀；过长多半是表头/口号
+    if _COOKED_DISH.search(text):
+        return ""
+    return text
+
+
+def clean_vegetable_name(raw: str, *, truncate: bool = True) -> str:
+    """词库内菜名直接返回；词库外不自动放行（候选由解析层标待确认）。"""
+    text = _extract_candidate_name(raw)
+    if not text:
+        return ""
     if text not in _VEGETABLES:
-        if len(text) > 6:
-            return ""
-        if not _VEG_LIKE.match(text):
-            return ""
-        if _COOKED_DISH.search(text):
-            return ""
+        return ""
     if truncate and len(text) > 16:
         text = text[:16]
     return text
@@ -624,13 +629,7 @@ def split_vegetable_names(raw: str) -> list[str]:
                 matched = True
                 break
         if not matched:
-            if (
-                remaining in _VEGETABLES
-                or (
-                    _is_plausible_unknown_veg(remaining)
-                    and _VEG_LIKE.match(remaining)
-                )
-            ):
+            if remaining in _VEGETABLES:
                 found.append(remaining)
             break
     seen: set[str] = set()
@@ -652,7 +651,7 @@ def normalize_name(name: str) -> str:
 
 
 def _clean_name_cell(text: str, *, allow_unknown: bool = False) -> str:
-    """表格单元格菜名。allow_unknown 仅用于结构完整的分拣单行。"""
+    """表格单元格菜名。allow_unknown 时仅返回可询问的候选，不自动入库。"""
     t = text.strip().lstrip("*").rstrip("*")
     if not t or t in _SKIP_TOKENS:
         return ""
@@ -660,7 +659,6 @@ def _clean_name_cell(text: str, *, allow_unknown: bool = False) -> str:
         return ""
     if _CODE.match(t) and not any("\u4e00" <= c <= "\u9fff" for c in t):
         return ""
-    # 纯数字不是菜名
     if re.fullmatch(r"\d+(?:\.\d+)?", t.replace(" ", "")):
         return ""
     if t[0].isdigit():
@@ -670,10 +668,7 @@ def _clean_name_cell(text: str, *, allow_unknown: bool = False) -> str:
         return cleaned
     if not allow_unknown:
         return ""
-    # 分拣单结构完整时：干净短中文可入库（成品菜/脏词仍拒）
-    only = re.sub(r"[（(][^）)]*[）)]", "", t)
-    only = "".join(c for c in only if "\u4e00" <= c <= "\u9fff")
-    only = _strip_category_prefixes(only).strip("*")
+    only = _extract_candidate_name(t)
     if only in _VEGETABLES:
         return only
     if _is_plausible_unknown_veg(only):
@@ -682,7 +677,7 @@ def _clean_name_cell(text: str, *, allow_unknown: bool = False) -> str:
 
 
 def _row_allows_unknown_name(tokens: list[tuple[float, str]]) -> bool:
-    """像真实分拣单数据行才放行未知菜名：有分类，且有单位或数量。"""
+    """分拣单结构完整才把未知名当作「待确认新菜」候选。"""
     texts = [t for _, t in tokens]
     has_cat = any(
         _CAT_TOKEN.match(t) or t.startswith("P硬") or t.startswith("P精") for t in texts
@@ -933,10 +928,19 @@ def _parse_row_boxes(row: list[OcrBox]) -> list[ParsedItem]:
                 nums.append((cx, q))
             continue
 
-        # 单框聊天：茄子5斤 / 藕2节 / 白菜3个@某人（聊天走严格菜名，不放宽）
+        # 单框聊天：茄子5斤 / 藕2节 / 白菜3个@某人
         cm = _CHAT_LINE.match(t.replace(" ", ""))
         if cm and cm.group("name") and cm.group("qty"):
-            n = _clean_name_cell(cm.group("name"), allow_unknown=False)
+            n = _clean_name_cell(cm.group("name"))
+            pending_new = False
+            if not n:
+                cand = _extract_candidate_name(cm.group("name"))
+                if (
+                    _is_plausible_unknown_veg(cand)
+                    and _VEG_LIKE.match(cand)
+                ):
+                    n = cand
+                    pending_new = True
             q = float(cm.group("qty"))
             u = cm.group("unit")
             tail = cm.group("tail") or ""
@@ -952,12 +956,19 @@ def _parse_row_boxes(row: list[OcrBox]) -> list[ParsedItem]:
                             unit_raw=u,
                             jin=None,
                             unit_assumed=False,
-                            remark=f"单位为{u}，未折斤",
+                            remark=(
+                                PENDING_NEW_VEG_REMARK
+                                if pending_new
+                                else f"单位为{u}，未折斤"
+                            ),
                             source_line=t,
                             include_in_summary=False,
                         )
                     ]
                 item = _make_item(n, q, u or unit, t)
+                if item and pending_new:
+                    item.remark = PENDING_NEW_VEG_REMARK
+                    item.include_in_summary = False
                 return [item] if item else []
 
         name = _clean_name_cell(t, allow_unknown=allow_unknown)
@@ -977,8 +988,8 @@ def _parse_row_boxes(row: list[OcrBox]) -> list[ParsedItem]:
 
     item = _make_item(primary, qty, unit, line)
     if item and primary not in _VEGETABLES:
-        note = "未收录菜名待核"
-        item.remark = f"{item.remark}；{note}" if item.remark else note
+        item.remark = PENDING_NEW_VEG_REMARK
+        item.include_in_summary = False
     return [item] if item else []
 
 
@@ -1068,6 +1079,12 @@ def parse_line_multi(line: str) -> list[ParsedItem]:
     if not names:
         n = clean_vegetable_name(name_src)
         names = [n] if n else []
+    pending_new = False
+    if not names:
+        cand = _extract_candidate_name(name_src)
+        if _is_plausible_unknown_veg(cand) and _VEG_LIKE.match(cand):
+            names = [cand]
+            pending_new = True
     if not names:
         return []
     result: list[ParsedItem] = []
@@ -1075,6 +1092,9 @@ def parse_line_multi(line: str) -> list[ParsedItem]:
         q = qty if i == len(names) - 1 else None
         item = _make_item(name, q, unit if q is not None else None, line)
         if item:
+            if pending_new or name not in _VEGETABLES:
+                item.remark = PENDING_NEW_VEG_REMARK
+                item.include_in_summary = False
             result.append(item)
     return result
 

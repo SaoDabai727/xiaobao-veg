@@ -317,7 +317,6 @@ _BUILTIN_VEGETABLES = frozenset(
         "蒜苔",
         "蒜苗",
         "蒜米",
-        "蒜肉",
         "线椒",
         "青椒",
         "红椒",

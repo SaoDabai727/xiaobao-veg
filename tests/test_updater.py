@@ -84,10 +84,66 @@ def test_merge_install_skips_data(tmp_path: Path | None = None) -> None:
     (dst / "data").mkdir(parents=True)
     (dst / "data" / "蔬菜账本.xlsx").write_text("USER", encoding="utf-8")
     (dst / "old.txt").write_text("old", encoding="utf-8")
+    (dst / "_internal").mkdir(parents=True)
+    (dst / "_internal" / "x.txt").write_text("old-internal", encoding="utf-8")
+    (dst / "unins000.exe").write_text("keeper", encoding="utf-8")
     merge_install(src, dst)
     assert (dst / "data" / "蔬菜账本.xlsx").read_text(encoding="utf-8") == "USER"
     assert (dst / "_internal" / "x.txt").read_text(encoding="utf-8") == "new"
     assert (dst / "蔬菜汇总.exe").read_text(encoding="utf-8") == "exe-new"
+    assert (dst / "unins000.exe").read_text(encoding="utf-8") == "keeper"
+
+
+def test_spawn_prefers_extracted_helper(tmp_path: Path | None = None) -> None:
+    """解压出的新版 exe 应作为 apply 助手，避免占用安装目录。"""
+    from pathlib import Path as P
+
+    from app import updater as u
+
+    base = tmp_path if tmp_path is not None else P(__file__).resolve().parent / "_tmp_spawn"
+    if tmp_path is None:
+        import shutil
+
+        if base.exists():
+            shutil.rmtree(base)
+        base.mkdir(parents=True)
+    src = base / "src"
+    dst = base / "dst"
+    src.mkdir()
+    dst.mkdir()
+    helper = src / u.EXE_NAME
+    helper.write_text("fake", encoding="utf-8")
+
+    calls: list[dict] = []
+
+    def fake_popen(cmd, **kwargs):  # noqa: ANN001
+        calls.append({"cmd": list(cmd), "cwd": kwargs.get("cwd"), "env": kwargs.get("env")})
+
+        class _P:
+            pass
+
+        return _P()
+
+    real_popen = u.subprocess.Popen
+    real_exit = u.os._exit
+    real_frozen = getattr(u.sys, "frozen", False)
+    try:
+        u.subprocess.Popen = fake_popen  # type: ignore[assignment]
+        u.sys.frozen = True  # type: ignore[attr-defined]
+        u.os._exit = lambda code: (_ for _ in ()).throw(SystemExit(code))  # type: ignore[assignment]
+        try:
+            u.spawn_apply_and_exit(src, dst)
+        except SystemExit as e:
+            assert e.code == 0
+        assert calls, "应拉起助手进程"
+        assert calls[0]["cmd"][0] == str(helper)
+        assert calls[0]["cmd"][1] == "--apply-update"
+        assert calls[0]["cwd"] == str(src)
+        assert calls[0]["env"].get("PYINSTALLER_RESET_ENVIRONMENT") == "1"
+    finally:
+        u.subprocess.Popen = real_popen  # type: ignore[assignment]
+        u.os._exit = real_exit  # type: ignore[assignment]
+        u.sys.frozen = real_frozen  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":
@@ -97,4 +153,5 @@ if __name__ == "__main__":
     test_relaunch_env_resets_pyinstaller()
     test_format_download_progress()
     test_merge_install_skips_data()
+    test_spawn_prefers_extracted_helper()
     print("ok")

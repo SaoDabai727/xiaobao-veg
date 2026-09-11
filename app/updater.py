@@ -320,14 +320,72 @@ def merge_install(src_root: Path, dest_root: Path) -> None:
     for item in src_root.iterdir():
         if item.name.lower() == "data":
             continue
+        # 安装包卸载器残留，勿动
+        if item.name.lower().startswith("unins"):
+            continue
         target = dest_root / item.name
         if item.is_dir():
-            if target.exists():
-                shutil.rmtree(target)
-            shutil.copytree(item, target)
+            _replace_dir(item, target)
         else:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(item, target)
+            _replace_file(item, target)
+
+
+def _rmtree_retry(path: Path, attempts: int = 8) -> None:
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            if path.exists():
+                shutil.rmtree(path)
+            return
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            time.sleep(0.35 + i * 0.15)
+    if last:
+        raise last
+
+
+def _replace_dir(src: Path, dest: Path) -> None:
+    """替换目录：优先改名旧目录再拷贝，避免文件被占用时 rmtree 失败。"""
+    if dest.exists():
+        bak = dest.with_name(dest.name + ".bak")
+        if bak.exists():
+            _rmtree_retry(bak)
+        try:
+            dest.rename(bak)
+        except OSError:
+            _rmtree_retry(dest)
+        else:
+            # 后台尽力删旧目录（偶有句柄未释放）
+            try:
+                _rmtree_retry(bak)
+            except Exception:  # noqa: BLE001
+                pass
+    shutil.copytree(src, dest)
+
+
+def _replace_file(src: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(src, dest)
+        return
+    except PermissionError:
+        pass
+    bak = dest.with_suffix(dest.suffix + ".old")
+    try:
+        if bak.exists():
+            bak.unlink()
+    except OSError:
+        pass
+    try:
+        if dest.exists():
+            dest.rename(bak)
+    except OSError as exc:
+        raise PermissionError(f"无法替换占用中的文件：{dest}") from exc
+    shutil.copy2(src, dest)
+    try:
+        bak.unlink()
+    except OSError:
+        pass
 
 
 def _wait_pid(pid: int, timeout: float = 120.0) -> None:
@@ -398,15 +456,30 @@ def apply_update_main(argv: list[str]) -> int:
         return 2
 
     _wait_pid(pid)
-    time.sleep(0.6)
+    time.sleep(1.0)
+    err_log = Path(tempfile.gettempdir()) / "xiaobao-update-error.txt"
+    ok = True
     try:
         merge_install(src, dest)
     except Exception as exc:  # noqa: BLE001
-        log = Path(tempfile.gettempdir()) / "xiaobao-update-error.txt"
-        log.write_text(f"{exc}\n", encoding="utf-8")
-        return 1
+        ok = False
+        import traceback
 
-    _start_app(dest)
+        err_log.write_text(
+            f"{exc}\n\n{traceback.format_exc()}\nsrc={src}\ndest={dest}\n",
+            encoding="utf-8",
+        )
+
+    # 无论合并成败都尝试拉起，避免用户只看到闪退
+    try:
+        _start_app(dest)
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        try:
+            prev = err_log.read_text(encoding="utf-8") if err_log.exists() else ""
+        except OSError:
+            prev = ""
+        err_log.write_text(prev + f"\nrestart failed: {exc}\n", encoding="utf-8")
 
     # 清理解压父目录（src 的上一级常为临时解压根）
     try:
@@ -415,13 +488,39 @@ def apply_update_main(argv: list[str]) -> int:
             shutil.rmtree(parent, ignore_errors=True)
     except Exception:  # noqa: BLE001
         pass
-    return 0
+    return 0 if ok else 1
 
 
 def spawn_apply_and_exit(src_root: Path, dest_root: Path) -> None:
+    """退出当前进程前拉起更新助手。
+
+    关键用解压出的新版 exe 做合并，避免助手占用安装目录 _internal 导致覆盖失败闪退。
+    """
     pid = os.getpid()
-    if getattr(sys, "frozen", False):
-        cmd = [sys.executable, "--apply-update", str(src_root), str(dest_root), str(pid)]
+    helper = src_root / EXE_NAME
+    cwd: str | None = None
+    if getattr(sys, "frozen", False) and helper.is_file():
+        cmd = [
+            str(helper),
+            "--apply-update",
+            str(src_root),
+            str(dest_root),
+            str(pid),
+        ]
+        cwd = str(src_root)
+    elif getattr(sys, "frozen", False):
+        # onefile 兜底：复制自身到临时目录再执行
+        work = Path(tempfile.mkdtemp(prefix="xiaobao-updater-bin-"))
+        helper = work / "updater.exe"
+        shutil.copy2(sys.executable, helper)
+        cmd = [
+            str(helper),
+            "--apply-update",
+            str(src_root),
+            str(dest_root),
+            str(pid),
+        ]
+        cwd = str(work)
     else:
         # 开发：用当前解释器跑 run.py
         run_py = Path(__file__).resolve().parent.parent / "run.py"
@@ -436,6 +535,7 @@ def spawn_apply_and_exit(src_root: Path, dest_root: Path) -> None:
 
     subprocess.Popen(
         cmd,
+        cwd=cwd,
         env=relaunch_env(),
         close_fds=True,
         creationflags=_detached_flags(),
